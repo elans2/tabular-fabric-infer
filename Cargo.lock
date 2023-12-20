@@ -499,7 +499,6 @@ dependencies = [
 [[package]]
 name = "candle-core"
 version = "0.3.1"
-source = "git+ssh://git@git.basebit.me/daas/candle.git?branch=daas#5bde5455276a50f85ab94a61c15310aec487ad7e"
 dependencies = [
  "byteorder",
  "gemm",
@@ -519,7 +518,6 @@ dependencies = [
 [[package]]
 name = "candle-nn"
 version = "0.3.1"
-source = "git+ssh://git@git.basebit.me/daas/candle.git?branch=daas#5bde5455276a50f85ab94a61c15310aec487ad7e"
 dependencies = [
  "candle-core",
  "half",
@@ -533,7 +531,6 @@ dependencies = [
 [[package]]
 name = "candle-transformers"
 version = "0.3.1"
-source = "git+ssh://git@git.basebit.me/daas/candle.git?branch=daas#5bde5455276a50f85ab94a61c15310aec487ad7e"
 dependencies = [
  "byteorder",
  "candle-core",

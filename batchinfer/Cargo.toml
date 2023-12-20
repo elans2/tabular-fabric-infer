@@ -17,7 +17,7 @@ thiserror = { version = "1.0.50" }
 anyhow = { workspace = true }
 itertools = { workspace = true}
 
-candle-core = {  git = "ssh://git@git.basebit.me/daas/candle.git", branch = "daas", features = ["default"] }
-candle-transformers = {  git = "ssh://git@git.basebit.me/daas/candle.git", branch = "daas", features = ["default"] }
-candle-nn = {  git = "ssh://git@git.basebit.me/daas/candle.git", branch = "daas", features = ["default"] }
+candle-core = {  path = "/Users/elans2/workspace/basebit/tabular-space/candle/candle-core", features = ["default"] }
+candle-transformers = {  path = "/Users/elans2/workspace/basebit/tabular-space/candle/candle-transformers", features = ["default"] }
+candle-nn = {  path = "/Users/elans2/workspace/basebit/tabular-space/candle/candle-nn", features = ["default"] }
 tokenizers = { version = "0.13.3" }
