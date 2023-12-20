@@ -1,0 +1,23 @@
+[package]
+name = "batchinfer"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name ="batchinfer"
+path = "src/lib.rs"
+test = false
+bench = false
+
+[dependencies]
+
+tokio = { workspace = true }
+arrow = { workspace = true }
+thiserror = { version = "1.0.50" }
+anyhow = { workspace = true }
+itertools = { workspace = true}
+
+candle-core = {  git = "ssh://git@git.basebit.me/daas/candle.git", branch = "daas", features = ["default"] }
+candle-transformers = {  git = "ssh://git@git.basebit.me/daas/candle.git", branch = "daas", features = ["default"] }
+candle-nn = {  git = "ssh://git@git.basebit.me/daas/candle.git", branch = "daas", features = ["default"] }
+tokenizers = { version = "0.13.3" }
