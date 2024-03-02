@@ -19,7 +19,7 @@ use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::generation::LogitsProcessor;
 use tokenizers::Tokenizer;
-use crate::base::GeneralInnerModelInfer;
+use crate::base::{GeneralInnerModelInfer, InferContext};
 use crate::token_output_stream::TokenOutputStream;
 
 pub fn device(cpu: bool) -> Result<Device, InferenceError> {
@@ -170,6 +170,7 @@ impl GeneralInnerModelInfer for CandleMistralModelInfer {
     fn infer(
         &self,
         batch: &RecordBatch,
+        context: &InferContext,
         options: HashMap<String, String>,
     ) -> Result<RecordBatch, InferenceError> {
         //let result = pipeline.run(&args.prompt, args.sample_len)?;

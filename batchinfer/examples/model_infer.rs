@@ -5,7 +5,7 @@ use arrow::record_batch::RecordBatch;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use batchinfer::base::GeneralInnerModelInfer;
+use batchinfer::base::{GeneralInnerModelInfer, InferContext};
 use batchinfer::mistral::CandleMistralModelInfer;
 
 
@@ -23,8 +23,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )])
     .unwrap();
 
+    let infer_context = InferContext{ share_slices: Default::default() };
+
     infer.load(HashMap::new(), HashMap::new());
-    infer.infer(&batch, HashMap::new());
+    infer.infer(&batch, &infer_context, HashMap::new());
 
     Ok(())
 }
