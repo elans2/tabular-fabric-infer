@@ -1,14 +1,8 @@
-#[package]
-#name = "tabular-fabric"
-#version = "0.1.0"
-#edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 
 [workspace]
 members = [
-    "batchinfer",
+    "tabular-fabric-cascade-infer",
 ]
 exclude = [
 ]
@@ -98,9 +92,9 @@ syn = { version = "1.0.86", features = ["full"] }
 hyper = "0.14.10"
 
 
-#criterion = "0.4"
-#test-log = "0.2.10"
-#pprof = { version = "0.11.0", features = ["flamegraph", "criterion"] }
+criterion = "0.4"
+test-log = "0.2.10"
+pprof = { version = "0.11.0", features = ["flamegraph", "criterion"] }
 
 
 
