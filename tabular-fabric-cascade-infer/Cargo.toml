@@ -1,10 +1,10 @@
 [package]
-name = "batchinfer"
+name = "tabular-fabric-cascade-infer"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name ="batchinfer"
+name ="tabular_fabric_cascade_infer"
 path = "src/lib.rs"
 test = false
 bench = false

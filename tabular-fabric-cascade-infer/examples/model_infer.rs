@@ -5,8 +5,8 @@ use arrow::record_batch::RecordBatch;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use batchinfer::base::{GeneralInnerModelInfer, InferContext};
-use batchinfer::mistral::CandleMistralModelInfer;
+use tabular_fabric_cascade_infer::base::{GeneralInnerModelInfer, InferContext};
+use tabular_fabric_cascade_infer::mistral::CandleMistralModelInfer;
 
 
 #[tokio::main]
