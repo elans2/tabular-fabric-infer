@@ -95,7 +95,7 @@ impl GeneralInnerModelInfer for CandleMistralModelInfer {
             sample_len: 100,
             tokenizer_file: None,
             weight_files: None,
-            quantized: true,
+            quantized: false,
             repeat_penalty: 1.0,
             repeat_last_n: 64,
         };
@@ -116,12 +116,14 @@ impl GeneralInnerModelInfer for CandleMistralModelInfer {
 
         println!("inner 1");
         let tokenizer_filename = std::path::PathBuf::from(
-            "/Users/elans2/workspace/basebit/open-models/mistral/tokenizer.json".to_string(),
+            "/Users/elans2/workspace/light/models/Mistral-7B-Instruct-v0.2/tokenizer.json".to_string(),
         );
         println!("inner 2");
-        let filenames = vec![std::path::PathBuf::from(
-            "/Users/elans2/workspace/basebit/open-models/mistral/model-q4k.gguf".to_string(),
-        )];
+        let filenames = vec![
+            std::path::PathBuf::from("/Users/elans2/workspace/light/models/Mistral-7B-Instruct-v0.2/model-00001-of-00003.safetensors".to_string()),
+            std::path::PathBuf::from("/Users/elans2/workspace/light/models/Mistral-7B-Instruct-v0.2/model-00002-of-00003.safetensors".to_string()),
+            std::path::PathBuf::from("/Users/elans2/workspace/light/models/Mistral-7B-Instruct-v0.2/model-00003-of-00003.safetensors".to_string()),
+        ];
         println!("inner 3");
         let tokenizer = Tokenizer::from_file(tokenizer_filename).map_err(anyhow::Error::msg)?;
 
@@ -131,7 +133,8 @@ impl GeneralInnerModelInfer for CandleMistralModelInfer {
         let (model, device) = if arg.quantized {
             println!("inner 6");
             let filename = &filenames[0];
-            let vb = candle_transformers::quantized_var_builder::VarBuilder::from_gguf(filename)?;
+            let device = Device::new_metal(0)?;
+            let vb = candle_transformers::quantized_var_builder::VarBuilder::from_gguf(filename, &device)?;
             let model = QMistral::new(&config, vb)?;
             (Model::Quantized(model), Device::Cpu)
         } else {
@@ -237,8 +240,8 @@ impl CandleMistralTextGeneration {
 
     fn gen(&mut self, prompt: &str, sample_len: usize) -> Result<Vec<String>, InferenceError> {
         match &mut self.model {
-            Model::Mistral(m) => m.reset(),
-            Model::Quantized(m) => m.reset(),
+            Model::Mistral(m) => m.clear_kv_cache(),
+            Model::Quantized(m) => m.clear_kv_cache(),
         };
         self.tokenizer.clear();
         let mut tokens = self

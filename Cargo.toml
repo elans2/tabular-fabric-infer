@@ -98,10 +98,9 @@ syn = { version = "1.0.86", features = ["full"] }
 hyper = "0.14.10"
 
 
-[workspace.dev-dependencies]
-criterion = "0.4"
-test-log = "0.2.10"
-pprof = { version = "0.11.0", features = ["flamegraph", "criterion"] }
+#criterion = "0.4"
+#test-log = "0.2.10"
+#pprof = { version = "0.11.0", features = ["flamegraph", "criterion"] }
 
 
 

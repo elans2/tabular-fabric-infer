@@ -1,4 +1,3 @@
-#![feature(provide_any)]
 #![feature(error_generic_member_access)]
 #![feature(type_alias_impl_trait)]
 #![feature(iterator_try_collect)]
