@@ -21,4 +21,7 @@ candle-core = {  version = "0.4.1", features = ["default"] }
 candle-transformers = {  version = "0.4.1", features = ["default"] }
 candle-nn = {  version = "0.4.1", features = ["default"] }
 tokenizers = { version = "0.13.3" }
+serde_json = "1.0.114"
 
+structmap = { version = "0.1.6" }
+structmap-derive = { version = "0.1.6" }

@@ -1,4 +1,4 @@
-use crate::errors::InferenceError;
+use crate::errors::InferError;
 use std::backtrace::Backtrace;
 
 /// This is a wrapper around a tokenizer to ensure that tokens can be returned to the user in a
@@ -24,17 +24,17 @@ impl TokenOutputStream {
         self.tokenizer
     }
 
-    fn decode(&self, tokens: &[u32]) -> Result<String, InferenceError> {
+    fn decode(&self, tokens: &[u32]) -> Result<String, InferError> {
         match self.tokenizer.decode(tokens, true) {
             Ok(str) => Ok(str),
-            Err(err) => Err(InferenceError::GenericError {
+            Err(err) => Err(InferError::GenericError {
                 msg: format!("cannot decode: {}", err),
             }),
         }
     }
 
     // https://github.com/huggingface/text-generation-inference/blob/5ba53d44a18983a4de32d122f4cb46f4a17d9ef6/server/text_generation_server/models/model.py#L68
-    pub fn next_token(&mut self, token: u32) -> Result<Option<String>, InferenceError> {
+    pub fn next_token(&mut self, token: u32) -> Result<Option<String>, InferError> {
         let prev_text = if self.tokens.is_empty() {
             String::new()
         } else {
@@ -53,7 +53,7 @@ impl TokenOutputStream {
         }
     }
 
-    pub fn decode_rest(&self) -> Result<Option<String>, InferenceError> {
+    pub fn decode_rest(&self) -> Result<Option<String>, InferError> {
         let prev_text = if self.tokens.is_empty() {
             String::new()
         } else {
@@ -69,7 +69,7 @@ impl TokenOutputStream {
         }
     }
 
-    pub fn decode_all(&self) -> Result<String, InferenceError> {
+    pub fn decode_all(&self) -> Result<String, InferError> {
         self.decode(&self.tokens)
     }
 

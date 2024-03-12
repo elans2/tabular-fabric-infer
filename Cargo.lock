@@ -2409,6 +2409,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5ee073c9e4cd00e28217186dbe12796d692868f432bf2e97ee73bed0c56dfa01"
 
 [[package]]
+name = "structmap"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "660474c47ace6efc9626562196819bd307d981ab54da0d0a641b6f83b5680d89"
+dependencies = [
+ "structmap-derive",
+]
+
+[[package]]
+name = "structmap-derive"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0117ac597862ad619664a8c7b7e9addaadac3a06de5703f8b4724586b9e05986"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "subtle"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2498,6 +2518,9 @@ dependencies = [
  "candle-nn",
  "candle-transformers",
  "itertools 0.11.0",
+ "serde_json",
+ "structmap",
+ "structmap-derive",
  "thiserror",
  "tokenizers",
  "tokio",

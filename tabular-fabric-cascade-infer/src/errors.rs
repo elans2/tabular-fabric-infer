@@ -4,7 +4,7 @@ use candle_core;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum InferenceError {
+pub enum InferError {
     #[error("generic error: {msg}")]
     GenericError { msg: String },
 
@@ -26,35 +26,35 @@ pub enum InferenceError {
 }
 
 
-impl From<String> for InferenceError {
+impl From<String> for InferError {
     fn from(msg: String) -> Self {
-        InferenceError::GenericError {
+        InferError::GenericError {
             msg,
             //backtrace: Backtrace::capture(),
         }
     }
 }
 
-impl From<anyhow::Error> for InferenceError {
+impl From<anyhow::Error> for InferError {
     fn from(err: anyhow::Error) -> Self {
-        InferenceError::UnspecifiedError {
+        InferError::UnspecifiedError {
             msg: err.to_string(),
             source: err,
         }
     }
 }
 
-impl From<candle_core::Error> for InferenceError {
+impl From<candle_core::Error> for InferError {
     fn from(err: candle_core::Error) -> Self {
-        InferenceError::CandleError {
+        InferError::CandleError {
             source: err,
         }
     }
 }
 
-impl From<ArrowError> for InferenceError {
+impl From<ArrowError> for InferError {
     fn from(err: ArrowError) -> Self {
-        InferenceError::ArrowError {
+        InferError::ArrowError {
             source: err,
         }
     }

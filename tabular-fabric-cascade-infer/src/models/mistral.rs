@@ -11,18 +11,20 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use candle_transformers::models::mistral::{Config, Model as Mistral};
-use candle_transformers::models::quantized_mistral::Model as QMistral;
+use candle_transformers::models::mistral::{Config, Model};
+use candle_transformers::models::quantized_mistral::Model as QModel;
 
-use crate::errors::InferenceError;
+use crate::errors::InferError;
 use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::generation::LogitsProcessor;
 use tokenizers::Tokenizer;
 use crate::base::{GeneralInnerModelInfer, InferContext};
-use crate::token_output_stream::TokenOutputStream;
+use crate::utils::token_output_stream::TokenOutputStream;
+use structmap::FromMap;
+use structmap_derive::FromMap;
 
-pub fn device(cpu: bool) -> Result<Device, InferenceError> {
+pub fn device(cpu: bool) -> Result<Device, InferError> {
     if cpu {
         Ok(Device::Cpu)
     } else {
@@ -34,37 +36,57 @@ pub fn device(cpu: bool) -> Result<Device, InferenceError> {
     }
 }
 
+#[derive(FromMap)]
 struct CandleMistralArg {
     /// Run on CPU rather than on GPU.
     cpu: bool,
 
     use_flash_attn: bool,
 
-    prompt: String,
-
     /// The temperature used to generate samples.
-    temperature: Option<f64>,
+    temperature: f64,
 
     /// Nucleus sampling probability cutoff.
-    top_p: Option<f64>,
+    top_p: f64,
 
     /// The seed to use when generating random samples.
     seed: u64,
 
     /// The length of the sample to generate (in tokens).
-    sample_len: usize,
+    sample_len: u64,
 
-    tokenizer_file: Option<String>,
+    tokenizer_file: String,
 
-    weight_files: Option<String>,
+    weight_files: String,
+
+    cache_dir: String,
 
     quantized: bool,
 
     /// Penalty to be applied for repeating tokens, 1. means no penalty.
-    repeat_penalty: f32,
+    repeat_penalty: f64,
 
     /// The context size to consider for the repeat penalty.
-    repeat_last_n: usize,
+    repeat_last_n: u64,
+}
+
+impl Default for CandleMistralArg {
+    fn default() -> Self {
+        Self {
+            tokenizer_file: "".to_string(),
+            weight_files: "".to_string(),
+            cache_dir: "/tmp".to_string(),
+            cpu: true,
+            use_flash_attn: false,
+            temperature: 0.0,
+            top_p: 100 as f64,
+            seed: 299792458,
+            sample_len: 100,
+            quantized: true,
+            repeat_penalty: 1.0,
+            repeat_last_n: 64,
+        }
+    }
 }
 
 pub struct CandleMistralModelInfer {
@@ -82,23 +104,13 @@ impl CandleMistralModelInfer {
 impl GeneralInnerModelInfer for CandleMistralModelInfer {
     fn load(
         &self,
-        content: HashMap<String, String>,
         options: HashMap<String, String>,
-    ) -> Result<bool, InferenceError> {
-        let arg = CandleMistralArg {
-            cpu: true,
-            use_flash_attn: false,
-            prompt: "".to_string(),
-            temperature: None,
-            top_p: Some(10 as f64),
-            seed: 299792458,
-            sample_len: 100,
-            tokenizer_file: None,
-            weight_files: None,
-            quantized: false,
-            repeat_penalty: 1.0,
-            repeat_last_n: 64,
-        };
+    ) -> Result<bool, InferError> {
+        let mut arg = StringMap::new();
+        for kv in options.into_iter() {
+            arg.insert(kv.0, kv.1);
+        }
+        let arg = CandleMistralArg::from_stringmap(arg);
 
         println!(
             "avx: {}, neon: {}, simd128: {}, f16c: {}",
@@ -109,7 +121,7 @@ impl GeneralInnerModelInfer for CandleMistralModelInfer {
         );
         println!(
             "temp: {:.2} repeat-penalty: {:.2} repeat-last-n: {}",
-            arg.temperature.unwrap_or(0.),
+            arg.temperature,
             arg.repeat_penalty,
             arg.repeat_last_n
         );
@@ -135,8 +147,8 @@ impl GeneralInnerModelInfer for CandleMistralModelInfer {
             let filename = &filenames[0];
             let device = Device::new_metal(0)?;
             let vb = candle_transformers::quantized_var_builder::VarBuilder::from_gguf(filename, &device)?;
-            let model = QMistral::new(&config, vb)?;
-            (Model::Quantized(model), Device::Cpu)
+            let model = QModel::new(&config, vb)?;
+            (ModelMode::Quantized(model), Device::Cpu)
         } else {
             println!("inner 7");
             let device = device(arg.cpu)?;
@@ -146,8 +158,8 @@ impl GeneralInnerModelInfer for CandleMistralModelInfer {
                 DType::F32
             };
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
-            let model = Mistral::new(&config, vb)?;
-            (Model::Mistral(model), device)
+            let model = Model::new(&config, vb)?;
+            (ModelMode::Normal(model), device)
         };
 
         println!("inner 8");
@@ -155,10 +167,10 @@ impl GeneralInnerModelInfer for CandleMistralModelInfer {
             model,
             tokenizer,
             arg.seed,
-            arg.temperature,
-            arg.top_p,
-            arg.repeat_penalty,
-            arg.repeat_last_n,
+            Some(arg.temperature),
+            Some(arg.top_p),
+            arg.repeat_penalty as f32,
+            arg.repeat_last_n as usize,
             &device,
         );
 
@@ -175,7 +187,7 @@ impl GeneralInnerModelInfer for CandleMistralModelInfer {
         batch: &RecordBatch,
         context: &InferContext,
         options: HashMap<String, String>,
-    ) -> Result<RecordBatch, InferenceError> {
+    ) -> Result<RecordBatch, InferError> {
         //let result = pipeline.run(&args.prompt, args.sample_len)?;
         let array = batch.column(0);
         let values = array.as_any().downcast_ref::<StringArray>().unwrap();
@@ -201,13 +213,13 @@ impl GeneralInnerModelInfer for CandleMistralModelInfer {
     }
 }
 
-enum Model {
-    Mistral(Mistral),
-    Quantized(QMistral),
+enum ModelMode {
+    Normal(Model),
+    Quantized(QModel),
 }
 
 pub struct CandleMistralTextGeneration {
-    model: Model,
+    model: ModelMode,
     device: Device,
     tokenizer: TokenOutputStream,
     logits_processor: LogitsProcessor,
@@ -218,7 +230,7 @@ pub struct CandleMistralTextGeneration {
 impl CandleMistralTextGeneration {
     #[allow(clippy::too_many_arguments)]
     fn new(
-        model: Model,
+        model: ModelMode,
         tokenizer: Tokenizer,
         seed: u64,
         temp: Option<f64>,
@@ -238,10 +250,10 @@ impl CandleMistralTextGeneration {
         }
     }
 
-    fn gen(&mut self, prompt: &str, sample_len: usize) -> Result<Vec<String>, InferenceError> {
+    fn gen(&mut self, prompt: &str, sample_len: usize) -> Result<Vec<String>, InferError> {
         match &mut self.model {
-            Model::Mistral(m) => m.clear_kv_cache(),
-            Model::Quantized(m) => m.clear_kv_cache(),
+            ModelMode::Normal(m) => m.clear_kv_cache(),
+            ModelMode::Quantized(m) => m.clear_kv_cache(),
         };
         self.tokenizer.clear();
         let mut tokens = self
@@ -261,7 +273,7 @@ impl CandleMistralTextGeneration {
         let eos_token = match self.tokenizer.get_token("</s>") {
             Some(token) => token,
             None => {
-                return Err(InferenceError::GenericError {
+                return Err(InferError::GenericError {
                     msg: "cannot find the </s> token".to_string(),
                 })
             }
@@ -282,8 +294,8 @@ impl CandleMistralTextGeneration {
             let input = input3.clone();
             println!("start_pos {}", start_pos);
             let logits = match &mut self.model {
-                Model::Mistral(m) => m.forward(&input, start_pos)?,
-                Model::Quantized(m) => m.forward(&input, start_pos)?,
+                ModelMode::Normal(m) => m.forward(&input, start_pos)?,
+                ModelMode::Quantized(m) => m.forward(&input, start_pos)?,
             };
             println!("inf 10");
             println!("inf2 A {:#?}", logits.shape());

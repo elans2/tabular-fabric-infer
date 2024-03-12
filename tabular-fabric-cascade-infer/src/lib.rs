@@ -4,6 +4,6 @@
 #![feature(box_patterns)]
 //
 pub mod base;
-pub mod mistral;
-pub mod token_output_stream;
 pub mod errors;
+pub mod models;
+pub mod utils;

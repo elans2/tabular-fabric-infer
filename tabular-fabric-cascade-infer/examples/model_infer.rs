@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tabular_fabric_cascade_infer::base::{GeneralInnerModelInfer, InferContext};
-use tabular_fabric_cascade_infer::mistral::CandleMistralModelInfer;
+use tabular_fabric_cascade_infer::models::mistral::CandleMistralModelInfer;
 
 
 #[tokio::main]
@@ -23,9 +23,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )])
     .unwrap();
 
-    let infer_context = InferContext{ share_slices: Default::default() };
+    let infer_context = InferContext::default();
 
-    infer.load(HashMap::new(), HashMap::new());
+    infer.load(HashMap::new());
     infer.infer(&batch, &infer_context, HashMap::new());
 
     Ok(())
