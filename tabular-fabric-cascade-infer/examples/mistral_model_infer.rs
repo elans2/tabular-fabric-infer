@@ -25,7 +25,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let infer_context = InferContext::default();
 
-    infer.load(HashMap::new());
+    let mut load_options = HashMap::new();
+    load_options.insert("tokenizer_file".to_string(), "/Users/elans2/workspace/light/models/Qwen-7B-Instruct-v0.2/tokenizer.json".to_string());
+    load_options.insert("weight_files".to_string(), "/Users/elans2/workspace/light/models/Qwen-7B-Instruct-v0.2/model.safetensors".to_string());
+
+    infer.load(load_options);
     infer.infer(&batch, &infer_context, HashMap::new());
 
     Ok(())

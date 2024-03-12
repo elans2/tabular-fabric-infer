@@ -59,8 +59,6 @@ struct CandleMistralArg {
 
     weight_files: String,
 
-    cache_dir: String,
-
     quantized: bool,
 
     /// Penalty to be applied for repeating tokens, 1. means no penalty.
@@ -75,14 +73,13 @@ impl Default for CandleMistralArg {
         Self {
             tokenizer_file: "".to_string(),
             weight_files: "".to_string(),
-            cache_dir: "/tmp".to_string(),
             cpu: true,
             use_flash_attn: false,
             temperature: 0.0,
             top_p: 100 as f64,
             seed: 299792458,
             sample_len: 100,
-            quantized: true,
+            quantized: false,
             repeat_penalty: 1.0,
             repeat_last_n: 64,
         }
@@ -127,24 +124,22 @@ impl GeneralInnerModelInfer for CandleMistralModelInfer {
         );
 
         println!("inner 1");
-        let tokenizer_filename = std::path::PathBuf::from(
-            "/Users/elans2/workspace/light/models/Mistral-7B-Instruct-v0.2/tokenizer.json".to_string(),
+        let tokenizer_file = std::path::PathBuf::from(
+            arg.tokenizer_file,
         );
         println!("inner 2");
-        let filenames = vec![
-            std::path::PathBuf::from("/Users/elans2/workspace/light/models/Mistral-7B-Instruct-v0.2/model-00001-of-00003.safetensors".to_string()),
-            std::path::PathBuf::from("/Users/elans2/workspace/light/models/Mistral-7B-Instruct-v0.2/model-00002-of-00003.safetensors".to_string()),
-            std::path::PathBuf::from("/Users/elans2/workspace/light/models/Mistral-7B-Instruct-v0.2/model-00003-of-00003.safetensors".to_string()),
-        ];
+
+        let weight_files = arg.weight_files.split(",").map(|x| std::path::PathBuf::from(x)).collect::<Vec<std::path::PathBuf>>();
+
         println!("inner 3");
-        let tokenizer = Tokenizer::from_file(tokenizer_filename).map_err(anyhow::Error::msg)?;
+        let tokenizer = Tokenizer::from_file(tokenizer_file).map_err(anyhow::Error::msg)?;
 
         println!("inner 4");
         let config = Config::config_7b_v0_1(arg.use_flash_attn);
         println!("inner 5");
         let (model, device) = if arg.quantized {
             println!("inner 6");
-            let filename = &filenames[0];
+            let filename = &weight_files[0];
             let device = Device::new_metal(0)?;
             let vb = candle_transformers::quantized_var_builder::VarBuilder::from_gguf(filename, &device)?;
             let model = QModel::new(&config, vb)?;
@@ -157,7 +152,7 @@ impl GeneralInnerModelInfer for CandleMistralModelInfer {
             } else {
                 DType::F32
             };
-            let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
+            let vb = unsafe { VarBuilder::from_mmaped_safetensors(&weight_files, dtype, &device)? };
             let model = Model::new(&config, vb)?;
             (ModelMode::Normal(model), device)
         };

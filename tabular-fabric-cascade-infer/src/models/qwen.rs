@@ -54,11 +54,11 @@ struct CandleQwenArg {
     /// The length of the sample to generate (in tokens).
     sample_len: u64,
 
+    config_file: String,
+
     tokenizer_file: String,
 
     weight_files: String,
-
-    cache_dir: String,
 
     quantized: bool,
 
@@ -72,16 +72,16 @@ struct CandleQwenArg {
 impl Default for CandleQwenArg {
     fn default() -> Self {
         Self {
+            config_file: "".to_string(),
             tokenizer_file: "".to_string(),
             weight_files: "".to_string(),
-            cache_dir: "/tmp".to_string(),
             cpu: true,
             use_flash_attn: false,
             temperature: 0.0,
             top_p: 100 as f64,
             seed: 299792458,
             sample_len: 100,
-            quantized: true,
+            quantized: false,
             repeat_penalty: 1.0,
             repeat_last_n: 64,
         }
@@ -128,21 +128,19 @@ impl GeneralInnerModelInfer for CandleQwenModelInfer {
         );
 
         println!("inner 1");
-        let tokenizer_filename = std::path::PathBuf::from(
-            "/Users/elans2/workspace/light/models/Qwen-7B-Instruct-v0.2/tokenizer.json".to_string(),
+        let tokenizer_file = std::path::PathBuf::from(
+            arg.tokenizer_file,
         );
         println!("inner 2");
-        let filenames = vec![
-            std::path::PathBuf::from("/Users/elans2/workspace/light/models/Qwen-7B-Instruct-v0.2/model-00001-of-00003.safetensors".to_string()),
-            std::path::PathBuf::from("/Users/elans2/workspace/light/models/Qwen-7B-Instruct-v0.2/model-00002-of-00003.safetensors".to_string()),
-            std::path::PathBuf::from("/Users/elans2/workspace/light/models/Qwen-7B-Instruct-v0.2/model-00003-of-00003.safetensors".to_string()),
-        ];
+
+        let weight_files = arg.weight_files.split(",").map(|x| std::path::PathBuf::from(x)).collect::<Vec<std::path::PathBuf>>();
+
         println!("inner 3");
-        let tokenizer = Tokenizer::from_file(tokenizer_filename).map_err(anyhow::Error::msg)?;
+        println!("tokenizer file {:?}", tokenizer_file);
+        let tokenizer = Tokenizer::from_file(tokenizer_file).map_err(anyhow::Error::msg)?;
 
         println!("inner 4");
-        let config_filename = "config.json";
-        let config = std::fs::read_to_string(config_filename).unwrap();
+        let config = std::fs::read_to_string(arg.config_file).unwrap();
         let config: Config = serde_json::from_str(&config).unwrap();
         println!("inner 5");
         let (model, device) = if arg.quantized {
@@ -155,7 +153,7 @@ impl GeneralInnerModelInfer for CandleQwenModelInfer {
             } else {
                 DType::F32
             };
-            let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
+            let vb = unsafe { VarBuilder::from_mmaped_safetensors(&weight_files, dtype, &device)? };
             let model = Model::new(&config, vb)?;
             (ModelMode::Normal(model), device)
         };
