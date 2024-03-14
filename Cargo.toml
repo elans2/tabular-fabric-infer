@@ -1,7 +1,7 @@
 
 
 [workspace]
-members = [
+members = [ 
     "tabular-fabric-cascade-infer",
 ]
 exclude = [

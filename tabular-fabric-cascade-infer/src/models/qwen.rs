@@ -257,11 +257,6 @@ impl CandleQwenTextGeneration {
             .map_err(anyhow::Error::msg)?
             .get_ids()
             .to_vec();
-        for &t in tokens.iter() {
-            if let Some(t) = self.tokenizer.next_token(t)? {
-                print!("{t}")
-            }
-        }
 
         let mut generated_tokens = 0usize;
         let eos_token = match self.tokenizer.get_token("<|endoftext|>") {
@@ -276,33 +271,27 @@ impl CandleQwenTextGeneration {
         for index in 0..sample_len {
             let context_size = if index > 0 { 1 } else { tokens.len() };
             let start_pos = tokens.len().saturating_sub(context_size);
-            println!("start pos {}", start_pos);
+            println!("tokens: {} context_size {}, start_pos: {}", tokens.len(), context_size, start_pos);
             let ctxt = &tokens[start_pos..];
             let input = Tensor::new(ctxt, &self.device)?;
-            println!("input1 {:#?}", input.shape());
+            println!("input: {:?}", input.shape());
             let input = input.unsqueeze(0)?;
+            println!("input: {:?}", input.shape());
             let input2 = input.clone();
-            //println!("input2 {:#?}", input.shape());
             let input3 = Tensor::cat(&[input.clone(), input2], 0)?;
-            println!("input3 {:#?}", input3.shape());
+            println!("input: {:?}", input3.shape());
             let input = input3.clone();
-            println!("start_pos {}", start_pos);
             let logits = match &mut self.model {
                 ModelMode::Normal(m) => m.forward(&input, start_pos)?,
             };
-            println!("inf 10");
-            println!("inf2 A {:#?}", logits.shape());
-
+            println!("logits: {:?}", logits.shape());
             let logits = logits.get(0)?;
-            println!("inf2 B {:#?}", logits.shape());
-
+            println!("logits A: {:?}", logits.shape());
             let logits = logits.squeeze(0)?.to_dtype(DType::F32)?;
-            println!("inf2 C {:#?}", logits.shape());
+            println!("logits B: {:?}", logits.shape());
             let logits = if self.repeat_penalty == 1. {
-                println!("pent1");
                 logits
             } else {
-                println!("pent2");
                 let start_at = tokens.len().saturating_sub(self.repeat_last_n);
                 candle_transformers::utils::apply_repeat_penalty(
                     &logits,
@@ -310,16 +299,15 @@ impl CandleQwenTextGeneration {
                     &tokens[start_at..],
                 )?
             };
-
+            println!("logits C: {:?}", logits.shape());
             let next_token = self.logits_processor.sample(&logits)?;
             tokens.push(next_token);
             generated_tokens += 1;
             if next_token == eos_token {
                 break;
             }
-            if let Some(t) = self.tokenizer.next_token(next_token)? {
-                print!("{}", t);
-                result_tokens.push(t);
+            if let Some(token) = self.tokenizer.next_token(next_token)? {
+                result_tokens.push(token);
             }
         }
         if let Some(rest) = self.tokenizer.decode_rest().map_err(anyhow::Error::msg)? {
