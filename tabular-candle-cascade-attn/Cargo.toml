@@ -1,5 +1,5 @@
 [package]
-name = "tabular-candle-cascade-atten"
+name = "tabular-candle-cascade-attn"
 version = "0.0.1"
 edition = "2021"
 
