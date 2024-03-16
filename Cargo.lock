@@ -2643,10 +2643,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tabular-candle-cascade-atten"
-version = "0.1.0"
-
-[[package]]
 name = "tabular-fabric-cascade-infer"
 version = "0.1.0"
 dependencies = [
