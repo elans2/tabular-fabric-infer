@@ -6,11 +6,14 @@ use rayon::prelude::*;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-const KERNEL_FILES: [&str; 4] = [
-    "flash_api.cu",
-    "fmha_fwd_hdim32.cu",
-    "fmha_fwd_hdim64.cu",
-    "fmha_fwd_hdim128.cu",
+const KERNEL_FILES: [&str; 7] = [
+    "flashinfer/csrc/batch_decode.cu",
+    "flashinfer/csrc/batch_prefill.cu",
+    "flashinfer/csrc/cascade.cu",
+    "flashinfer/csrc/flashinfer_ops.cu",
+    "flashinfer/csrc/page.cu",
+    "flashinfer/csrc/single_decode.cu",
+    "flashinfer/csrc/single_prefill.cu",
 ];
 
 fn main() -> Result<()> {
@@ -28,9 +31,8 @@ fn main() -> Result<()> {
     for kernel_file in KERNEL_FILES.iter() {
         println!("cargo:rerun-if-changed=kernels/{kernel_file}");
     }
-    println!("cargo:rerun-if-changed=kernels/**.h");
-    println!("cargo:rerun-if-changed=kernels/**.cuh");
-    println!("cargo:rerun-if-changed=kernels/fmha/**.h");
+    println!("cargo:rerun-if-changed=kernels/flashinfer/**.h");
+    println!("cargo:rerun-if-changed=kernels/flashinfer/**.cuh");
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").context("OUT_DIR not set")?);
     let build_dir = match std::env::var("CANDLE_FLASH_ATTN_BUILD_DIR") {
         Err(_) =>
@@ -54,7 +56,7 @@ fn main() -> Result<()> {
 
     let compute_cap = compute_cap()?;
 
-    let out_file = build_dir.join("libflashattentionv1.a");
+    let out_file = build_dir.join("libflashinfer.a");
 
     let kernel_dir = PathBuf::from("kernels");
     let cu_files: Vec<_> = KERNEL_FILES
@@ -144,9 +146,18 @@ fn main() -> Result<()> {
         }
     }
     println!("cargo:rustc-link-search={}", build_dir.display());
-    println!("cargo:rustc-link-lib=flashattentionv1");
+    println!("cargo:rustc-link-lib=flashinfer");
     println!("cargo:rustc-link-lib=dylib=cudart");
     println!("cargo:rustc-link-lib=dylib=stdc++");
+
+    cxx_build::bridge("src/ffi.rs")
+            .file("kernels/candle/flashinfer_candle_op.cc")
+            .std("c++14")
+            .compile("tabular-candle-cascade-attn");
+
+        println!("cargo:rerun-if-changed=src/ffi.rs");
+        println!("cargo:rerun-if-changed=kernels/candle/flashinfer_candle_op.cc");
+        println!("cargo:rerun-if-changed=kernels/candle/flashinfer_candle_op.h");
 
     Ok(())
 }
@@ -253,6 +264,7 @@ fn compute_cap() -> Result<usize> {
             "CUDA compute cap {compute_cap} is higher than the highest gpu code from nvcc {max_nvcc_code}"
         );
     }
+
 
     Ok(compute_cap)
 }

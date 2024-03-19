@@ -3,6 +3,7 @@
 [workspace]
 members = [ 
     "tabular-fabric-cascade-infer",
+    "tabular-candle-cascade-attn",
 ]
 exclude = [
 ]

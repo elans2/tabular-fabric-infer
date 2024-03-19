@@ -10,14 +10,16 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 
 [dependencies]
-candle = { version = "*", package = "candle-core", features = ["cuda"]}
+candle = { version = "*", package = "candle-core", features = ["default"]}
 half = { version = "2.3.1", features = ["num-traits"] }
+cxx = "1.0"
 
 [build-dependencies]
 anyhow = { version = "1", features = ["backtrace"] }
 num_cpus = "1.15.0"
 rayon = "1.7.0"
+cxx-build = "1.0"
 
 [dev-dependencies]
 anyhow = { version = "1", features = ["backtrace"] }
-candle-nn = { version = "0.3.0", features = ["cuda"] }
+candle-nn = { version = "0.3.0", features = ["default"] }

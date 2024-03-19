@@ -32,7 +32,7 @@ fn flash_attn_varlen() -> Result<()> {
         let q = q.transpose(0, 1)?;
         let k = k.transpose(0, 1)?;
         let v = v.transpose(0, 1)?;
-        tabular_candle_cascade_attn::flash_attn_varlen(
+        tabular_candle_cascade_attn::cascade_attn_varlen(
             &q, &k, &v, &seqlens_q, &seqlens_k, 32, 32, 0.5, false,
         )?
         .transpose(0, 1)?
