@@ -1,5 +1,4 @@
-
-
 fn main() {
-    let client = tabular_candle_cascade_attn::ffi::ffi::new_blobstore_client();
+    let tensor = tabular_candle_cascade_attn::new_tensor();
+    println!("{}", tensor.is_null());
 }

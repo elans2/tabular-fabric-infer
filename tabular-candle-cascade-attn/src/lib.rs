@@ -1,284 +1,331 @@
-pub mod ffi;
+use cxx::UniquePtr;
+
+mod ffi;
 //
 // use candle;
 // use candle::Module;
 //
-// fn candle_tensor_to_torch_tensor_ptr(tensor: &candle::Tensor) -> ffi::TorchTensorPtr {
-//     todo!()
-// }
-//
-// enum Layout {
-//     NHD = 0,
-// }
-//
-// enum PosEncodingMode {
-//     None = 0,
-//     ROPE_LLAMA = 1,
-// }
-//
-// pub struct BatchPrefillWithPagedKVCacheWrapper {
-//     wrapper: Box<ffi::BatchPrefillWithPagedKVCacheTorchWrapper>,
-// }
-//
-// impl BatchPrefillWithPagedKVCacheWrapper {
-//     pub fn new(workspace_buffer: candle::Tensor, kv_layout: Layout) -> Self {
-//         let wrapper = Box::new(ffi::BatchPrefillWithPagedKVCacheTorchWrapper::new());
-//         Self { wrapper }
-//     }
-//
-//     pub fn begin_forward(
-//         &mut self,
-//         qo_indptr: &candle::Tensor,
-//         paged_kv_indptr: &candle::Tensor,
-//         paged_kv_indices: &candle::Tensor,
-//         paged_kv_last_page_len: &candle::Tensor,
-//         num_qo_heads: u32,
-//         num_kv_heads: u32,
-//         head_dim: u32,
-//     ) {
-//         self.wrapper.begin_forward(
-//             candle_tensor_to_torch_tensor_ptr(qo_indptr),
-//             candle_tensor_to_torch_tensor_ptr(paged_kv_indptr),
-//             candle_tensor_to_torch_tensor_ptr(paged_kv_indices),
-//             candle_tensor_to_torch_tensor_ptr(paged_kv_last_page_len),
-//             num_qo_heads,
-//             num_kv_heads,
-//             head_dim,
-//         );
-//     }
-//
-//     pub fn forward(
-//         &mut self,
-//         q: &candle::Tensor,
-//         paged_kv_data: &candle::Tensor,
-//         causal: bool,
-//         pos_encoding_mode: PosEncodingMode,
-//         allow_fp16_qk_reduction: bool,
-//         sm_scale: Option<f32>,
-//         rope_scale: Option<f32>,
-//         rope_theta: Option<f32>,
-//     ) -> candle::Tensor {
-//         self.wrapper.forward(
-//             candle_tensor_to_torch_tensor_ptr(q),
-//             candle_tensor_to_torch_tensor_ptr(paged_kv_data),
-//             causal,
-//             pos_encoding_mode as u32,
-//             allow_fp16_qk_reduction,
-//             sm_scale.unwrap_or(0.0),
-//             rope_scale.unwrap_or(0.0),
-//             rope_theta.unwrap_or(0.0),
-//         )
-//     }
-//
-//     pub fn forward_return_lse(
-//         &mut self,
-//         q: &candle::Tensor,
-//         paged_kv_data: &candle::Tensor,
-//         causal: bool,
-//         pos_encoding_mode: PosEncodingMode,
-//         allow_fp16_qk_reduction: bool,
-//         sm_scale: Option<f32>,
-//         rope_scale: Option<f32>,
-//         rope_theta: Option<f32>,
-//     ) -> (candle::Tensor, candle::Tensor) {
-//         self.wrapper.forward_return_lse(
-//             candle_tensor_to_torch_tensor_ptr(q),
-//             candle_tensor_to_torch_tensor_ptr(paged_kv_data),
-//             causal,
-//             pos_encoding_mode as u32,
-//             allow_fp16_qk_reduction,
-//             sm_scale.unwrap_or(0.0),
-//             rope_scale.unwrap_or(0.0),
-//             rope_theta.unwrap_or(0.0),
-//         )
-//     }
-//
-//     pub fn end_forward(&mut self) {
-//         self.wrapper.end_forward();
-//     }
-//
-//     pub fn reset_workspace_buffer(&mut self, new_workspace_buffer: &candle::Tensor) {
-//         self.wrapper
-//             .reset_workspace_buffer(candle_tensor_to_torch_tensor_ptr(new_workspace_buffer));
-//     }
-// }
-//
-// pub struct BatchDecodeWithPagedKVCacheWrapper {}
-//
-// impl BatchDecodeWithPagedKVCacheWrapper {
-//     pub fn new(workspace_buffer: candle::Tensor, kv_layout: Layout) -> Self {
-//         todo!()
-//     }
-//
-//     pub fn begin_forward(
-//         indptr: &candle::Tensor,
-//         indices: &candle::Tensor,
-//         last_page_len: &candle::Tensor,
-//         num_qo_heads: u32,
-//         num_kv_heads: u32,
-//         head_dim: u32,
-//         page_size: u32,
-//         pos_encoding_mode: PosEncodingMode,
-//         data_type: String,
-//     ) {
-//     }
-//
-//     pub fn forward(
-//         q: &candle::Tensor,
-//         paged_kv_data: &candle::Tensor,
-//         pos_encoding_mode: u32,
-//         sm_scale: Option<f32>,
-//         rope_scale: Option<f32>,
-//         rope_theta: Option<f32>,
-//     ) -> candle::Tensor {
-//         todo!()
-//     }
-//
-//     pub fn forward_return_lse(
-//         q: &candle::Tensor,
-//         paged_kv_data: &candle::Tensor,
-//         pos_encoding_mode: u32,
-//         sm_scale: Option<f32>,
-//         rope_scale: Option<f32>,
-//         rope_theta: Option<f32>,
-//     ) -> (candle::Tensor, candle::Tensor) {
-//         todo!()
-//     }
-//
-//     pub fn end_forward() {}
-//
-//     pub fn reset_workspace_buffer(new_workspace_buffer: &candle::Tensor) {
-//         todo!()
-//     }
-// }
-//
-// fn append_paged_kv_cache(
-//     append_key: &candle::Tensor,
-//     append_value: &candle::Tensor,
-//     append_indptr: &candle::Tensor,
-//     kv_data: &candle::Tensor,
-//     kv_indices: &candle::Tensor,
-//     kv_indptr: &candle::Tensor,
-//     kv_last_page_len: &candle::Tensor,
-//     layout: u32,
-// ) {
-//     todo!()
-// }
-//
-// fn merge_state(
-//     v_a: &candle::Tensor,
-//     s_a: &candle::Tensor,
-//     v_b: &candle::Tensor,
-//     s_b: &candle::Tensor,
-// ) -> Vec<candle::Tensor> {
-//     todo!()
-// }
-//
-// fn merge_state_in_place(
-//     v: &candle::Tensor,
-//     s: &candle::Tensor,
-//     v_other: &candle::Tensor,
-//     s_other: &candle::Tensor,
-// ) {
-//     todo!()
-// }
-//
-// fn merge_states(v: &candle::Tensor, s: &candle::Tensor) -> Vec<candle::Tensor> {
-//     todo!()
-// }
-//
-// pub struct BatchPrefillWithSharedPrefixPagedKVCacheWrapper {}
-//
-// impl BatchPrefillWithSharedPrefixPagedKVCacheWrapper {
-//     pub fn new(workspace_buffer: candle::Tensor, kv_layout: Layout) -> Self {
-//         todo!()
-//     }
-//
-//     pub fn begin_forward(
-//         qo_indptr: &candle::Tensor,
-//         paged_kv_indptr: &candle::Tensor,
-//         paged_kv_indices: &candle::Tensor,
-//         paged_kv_last_page_len: &candle::Tensor,
-//         num_qo_heads: u32,
-//         num_kv_heads: u32,
-//         head_dim: u32,
-//     ) {
-//     }
-//
-//     pub fn forward(
-//         q: &candle::Tensor,
-//         k_shared: &candle::Tensor,
-//         v_shared: &candle::Tensor,
-//         unique_kv_data: &candle::Tensor,
-//         causal: bool,
-//         allow_fp16_qk_reduction: bool,
-//         sm_scale: Option<f32>,
-//         rope_scale: Option<f32>,
-//         rope_theta: Option<f32>,
-//     ) -> candle::Tensor {
-//         todo!()
-//     }
-//
-//     pub fn end_forward() {}
-//
-//     pub fn reset_workspace_buffer(new_workspace_buffer: &candle::Tensor) {
-//         todo!()
-//     }
-// }
-//
-// pub struct BatchDecodeWithSharedPrefixPagedKVCacheWrapper {}
-//
-// impl BatchDecodeWithSharedPrefixPagedKVCacheWrapper {
-//     pub fn new(workspace_buffer: candle::Tensor, kv_layout: Layout) -> Self {
-//         todo!()
-//     }
-//
-//     pub fn begin_forward(
-//         indptr: &candle::Tensor,
-//         indices: &candle::Tensor,
-//         last_page_len: &candle::Tensor,
-//         num_qo_heads: u32,
-//         num_kv_heads: u32,
-//         head_dim: u32,
-//         page_size: u32,
-//         data_type: String,
-//     ) {
-//     }
-//
-//     pub fn forward(
-//         q: &candle::Tensor,
-//         k_shared: &candle::Tensor,
-//         v_shared: &candle::Tensor,
-//         unique_kv_data: &candle::Tensor,
-//         allow_fp16_qk_reduction: bool,
-//
-//         sm_scale: Option<f32>,
-//         rope_scale: Option<f32>,
-//         rope_theta: Option<f32>,
-//     ) -> candle::Tensor {
-//         todo!()
-//     }
-//
-//     pub fn end_forward() {}
-//
-//     pub fn reset_workspace_buffer(new_workspace_buffer: &candle::Tensor) {
-//         todo!()
-//     }
-// }
-//
-// pub fn cascade_attn_varlen(
-//     q: &candle::Tensor,
-//     k: &candle::Tensor,
-//     v: &candle::Tensor,
-//     seqlens_q: &candle::Tensor,
-//     seqlens_k: &candle::Tensor,
-//     max_seqlen_q: u32,
-//     max_seqlen_k: u32,
-//     softmax_scale: f32,
-//     causal: bool,
-// ) -> candle::Tensor {
-//     todo!()
-// }
+
+type UniqueTensor = UniquePtr<ffi::ffi::Tensor>;
+
+pub fn new_tensor() -> UniquePtr<ffi::Tensor> {
+    println!("new tensor ");
+    ffi::new_tensor()
+}
+
+enum Layout {
+    NHD = 0,
+}
+
+enum PosEncodingMode {
+    None = 0,
+    ROPE_LLAMA = 1,
+}
+
+pub struct BatchPrefillWithPagedKVCacheWrapper {
+    wrapper: Box<UniquePtr<ffi::BatchPrefillWithPagedKVCacheTorchWrapper>>,
+}
+
+impl BatchPrefillWithPagedKVCacheWrapper {
+    pub fn new(workspace_buffer: UniqueTensor, kv_layout: Layout) -> Self {
+        let wrapper = Box::new(ffi::new_batch_prefill_with_paged_kv_cache_torch_wrapper());
+        Self { wrapper }
+    }
+
+    pub fn begin_forward(
+        &mut self,
+        qo_indptr: &UniqueTensor,
+        paged_kv_indptr: &UniqueTensor,
+        paged_kv_indices: &UniqueTensor,
+        paged_kv_last_page_len: &UniqueTensor,
+        num_qo_heads: u32,
+        num_kv_heads: u32,
+        head_dim: u32,
+    ) {
+        self.wrapper.begin_forward(
+            qo_indptr,
+            paged_kv_indptr,
+            paged_kv_indices,
+            paged_kv_last_page_len,
+            num_qo_heads,
+            num_kv_heads,
+            head_dim,
+        );
+    }
+
+    pub fn forward(
+        &mut self,
+        q: &UniqueTensor,
+        paged_kv_data: &UniqueTensor,
+        causal: bool,
+        pos_encoding_mode: PosEncodingMode,
+        allow_fp16_qk_reduction: bool,
+        sm_scale: Option<f32>,
+        rope_scale: Option<f32>,
+        rope_theta: Option<f32>,
+    ) -> UniqueTensor {
+        self.wrapper.forward(
+            q,
+            paged_kv_data,
+            causal,
+            pos_encoding_mode as u32,
+            allow_fp16_qk_reduction,
+            sm_scale.unwrap_or(0.0),
+            rope_scale.unwrap_or(0.0),
+            rope_theta.unwrap_or(0.0),
+        )
+    }
+
+    pub fn forward_return_lse(
+        &mut self,
+        q: &UniqueTensor,
+        paged_kv_data: &UniqueTensor,
+        causal: bool,
+        pos_encoding_mode: PosEncodingMode,
+        allow_fp16_qk_reduction: bool,
+        sm_scale: Option<f32>,
+        rope_scale: Option<f32>,
+        rope_theta: Option<f32>,
+    ) -> (UniqueTensor, UniqueTensor) {
+        self.wrapper.forward_return_lse(
+            q,
+            paged_kv_data,
+            causal,
+            pos_encoding_mode as u32,
+            allow_fp16_qk_reduction,
+            sm_scale.unwrap_or(0.0),
+            rope_scale.unwrap_or(0.0),
+            rope_theta.unwrap_or(0.0),
+        )
+    }
+
+    pub fn end_forward(&mut self) {
+        self.wrapper.end_forward();
+    }
+
+    pub fn reset_workspace_buffer(&mut self, new_workspace_buffer: &UniqueTensor) {
+        self.wrapper.reset_workspace_buffer(new_workspace_buffer);
+    }
+}
+
+pub struct BatchDecodeWithPagedKVCacheWrapper {
+    wrapper: Box<UniquePtr<ffi::BatchDecodeWithPagedKVCacheTorchWrapper>>,
+}
+
+impl BatchDecodeWithPagedKVCacheWrapper {
+    pub fn new(workspace_buffer: UniqueTensor, kv_layout: Layout) -> Self {
+        let wrapper = Box::new(ffi::new_batch_decode_with_paged_kv_cache_torch_wrapper());
+        Self { wrapper }
+    }
+
+    pub fn begin_forward(
+        &self,
+        indptr: &UniqueTensor,
+        indices: &UniqueTensor,
+        last_page_len: &UniqueTensor,
+        num_qo_heads: u32,
+        num_kv_heads: u32,
+        head_dim: u32,
+        page_size: u32,
+        pos_encoding_mode: PosEncodingMode,
+        data_type: String,
+    ) {
+        self.wrapper.begin_forward(
+            indptr,
+            indices,
+            last_page_len,
+            num_qo_heads,
+            num_kv_heads,
+            head_dim,
+            page_size,
+            pos_encoding_mode as u32,
+            data_type,
+        );
+    }
+
+    pub fn forward(
+        &self,
+        q: &UniqueTensor,
+        paged_kv_data: &UniqueTensor,
+        pos_encoding_mode: u32,
+        sm_scale: Option<f32>,
+        rope_scale: Option<f32>,
+        rope_theta: Option<f32>,
+    ) -> UniqueTensor {
+        self.wrapper.forward(
+            q,
+            paged_kv_data,
+            pos_encoding_mode,
+            sm_scale.unwrap_or(0.0),
+            rope_scale.unwrap_or(0.0),
+            rope_theta.unwrap_or(0.0),
+        )
+    }
+
+    pub fn forward_return_lse(
+        &self,
+        q: &UniqueTensor,
+        paged_kv_data: &UniqueTensor,
+        pos_encoding_mode: u32,
+        sm_scale: Option<f32>,
+        rope_scale: Option<f32>,
+        rope_theta: Option<f32>,
+    ) -> (UniqueTensor, UniqueTensor) {
+        self.wrapper.forward_return_lse(
+            q,
+            paged_kv_data,
+            pos_encoding_mode,
+            sm_scale.unwrap_or(0.0),
+            rope_scale.unwrap_or(0.0),
+            rope_theta.unwrap_or(0.0),
+        )
+    }
+
+    pub fn end_forward(&self) {
+        self.wrapper.end_forward();
+    }
+
+    pub fn reset_workspace_buffer(&self, new_workspace_buffer: &UniqueTensor) {
+        self.wrapper.reset_workspace_buffer(new_workspace_buffer);
+    }
+}
+
+fn append_paged_kv_cache(
+    append_key: &UniqueTensor,
+    append_value: &UniqueTensor,
+    append_indptr: &UniqueTensor,
+    kv_data: &UniqueTensor,
+    kv_indices: &UniqueTensor,
+    kv_indptr: &UniqueTensor,
+    kv_last_page_len: &UniqueTensor,
+    layout: Layout,
+) {
+    ffi::append_paged_kv_cache(
+        append_key,
+        append_value,
+        append_indptr,
+        kv_data,
+        kv_indices,
+        kv_indptr,
+        kv_last_page_len,
+        layout,
+    );
+}
+
+fn merge_state(
+    v_a: &UniqueTensor,
+    s_a: &UniqueTensor,
+    v_b: &UniqueTensor,
+    s_b: &UniqueTensor,
+) -> Vec<UniqueTensor> {
+    ffi::merge_state(v_a, s_a, v_b, s_b)
+}
+
+fn merge_state_in_place(
+    v: &UniqueTensor,
+    s: &UniqueTensor,
+    v_other: &UniqueTensor,
+    s_other: &UniqueTensor,
+) {
+    ffi::merge_state_in_place(v, s, v_other, s_other);
+}
+
+fn merge_states(v: &UniqueTensor, s: &UniqueTensor) -> Vec<UniqueTensor> {
+    ffi::merge_states(v, s)
+}
+
+pub struct BatchPrefillWithSharedPrefixPagedKVCacheWrapper {}
+
+impl BatchPrefillWithSharedPrefixPagedKVCacheWrapper {
+    pub fn new(workspace_buffer: UniqueTensor, kv_layout: Layout) -> Self {
+        todo!()
+    }
+
+    pub fn begin_forward(
+        qo_indptr: &UniqueTensor,
+        paged_kv_indptr: &UniqueTensor,
+        paged_kv_indices: &UniqueTensor,
+        paged_kv_last_page_len: &UniqueTensor,
+        num_qo_heads: u32,
+        num_kv_heads: u32,
+        head_dim: u32,
+    ) {
+    }
+
+    pub fn forward(
+        q: &UniqueTensor,
+        k_shared: &UniqueTensor,
+        v_shared: &UniqueTensor,
+        unique_kv_data: &UniqueTensor,
+        causal: bool,
+        allow_fp16_qk_reduction: bool,
+        sm_scale: Option<f32>,
+        rope_scale: Option<f32>,
+        rope_theta: Option<f32>,
+    ) -> UniqueTensor {
+        todo!()
+    }
+
+    pub fn end_forward() {}
+
+    pub fn reset_workspace_buffer(new_workspace_buffer: &UniqueTensor) {
+        todo!()
+    }
+}
+
+pub struct BatchDecodeWithSharedPrefixPagedKVCacheWrapper {}
+
+impl BatchDecodeWithSharedPrefixPagedKVCacheWrapper {
+    pub fn new(workspace_buffer: UniqueTensor, kv_layout: Layout) -> Self {
+        todo!()
+    }
+
+    pub fn begin_forward(
+        indptr: &UniqueTensor,
+        indices: &UniqueTensor,
+        last_page_len: &UniqueTensor,
+        num_qo_heads: u32,
+        num_kv_heads: u32,
+        head_dim: u32,
+        page_size: u32,
+        data_type: String,
+    ) {
+    }
+
+    pub fn forward(
+        q: &UniqueTensor,
+        k_shared: &UniqueTensor,
+        v_shared: &UniqueTensor,
+        unique_kv_data: &UniqueTensor,
+        allow_fp16_qk_reduction: bool,
+
+        sm_scale: Option<f32>,
+        rope_scale: Option<f32>,
+        rope_theta: Option<f32>,
+    ) -> UniqueTensor {
+        todo!()
+    }
+
+    pub fn end_forward() {}
+
+    pub fn reset_workspace_buffer(new_workspace_buffer: &UniqueTensor) {
+        todo!()
+    }
+}
+
+pub fn cascade_attn_varlen(
+    q: &UniqueTensor,
+    k: &UniqueTensor,
+    v: &UniqueTensor,
+    seqlens_q: &UniqueTensor,
+    seqlens_k: &UniqueTensor,
+    max_seqlen_q: u32,
+    max_seqlen_k: u32,
+    softmax_scale: f32,
+    causal: bool,
+) -> UniqueTensor {
+    todo!()
+}
 
 //
 // use candle::backend::BackendStorage;

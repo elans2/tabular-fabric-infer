@@ -1,20 +1,80 @@
-#[cxx::bridge]
+#[cxx::bridge(namespace = "flashinfer_candle_op")]
 pub mod ffi {
     unsafe extern "C++" {
         include!("tabular-candle-cascade-attn/kernels/candle/flashinfer_candle_op.h");
 
-        // pub type TorchTensorPtr;
-        //
-        // pub type BatchPrefillWithPagedKVCacheTorchWrapper;
-        // pub type BatchDecodeWithPagedKVCacheTorchWrapper;
-        //
-        // /*
-        //     std::vector<TorchTensorPtr> batch_decode_with_padded_kv_cache(
-        // TorchTensorPtr q, TorchTensorPtr k_padded, TorchTensorPtr v_padded, unsigned int layout,
-        // unsigned int pos_encoding_mode, float sm_scale, float rope_scale, float rope_theta,
-        // bool return_lse);
-        //      */
-        //
+        type Tensor;
+        fn new_tensor() -> UniquePtr<Tensor>;
+
+        type BatchPrefillWithPagedKVCacheTorchWrapper;
+
+        fn new_batch_prefill_with_paged_kv_cache_torch_wrapper(
+        ) -> UniquePtr<BatchPrefillWithPagedKVCacheTorchWrapper>;
+
+        fn begin_forward(
+            &self,
+            workspace_buffer: UniqueTensor,
+            indptr: UniqueTensor,
+            last_page_len: UniqueTensor,
+            batch_size: u32,
+            num_qo_heads: u32,
+            num_kv_heads: u32,
+            head_dim: u32,
+            page_size: u32,
+            pos_encoding_mode: u32,
+            empty_data: UniqueTensor,
+        );
+
+        fn end_forward(&self);
+
+        fn forward(
+            &self,
+            q: UniqueTensor,
+            paged_kv_data: UniqueTensor,
+            paged_kv_indptr: UniqueTensor,
+            paged_kv_indices: UniqueTensor,
+            paged_kv_last_page_len: UniqueTensor,
+            pos_encoding_mode: u32,
+            sm_scale: f32,
+            rope_scale: f32,
+            rope_theta: f32,
+            return_lse: bool,
+        ) -> Vec<UniqueTensor>;
+
+        type BatchDecodeWithPagedKVCacheTorchWrapper;
+
+        fn new_batch_decode_with_paged_kv_cache_torch_wrapper(
+        ) -> UniquePtr<BatchDecodeWithPagedKVCacheTorchWrapper>;
+
+        fn begin_forward(
+            &self,
+            workspace_buffer: UniqueTensor,
+            qo_indptr: UniqueTensor,
+            batch_size: u32,
+            num_qo_heads: u32,
+            num_kv_heads: u32,
+            head_dim: u32,
+        );
+
+        fn end_forward(&mut self);
+
+        fn forward(
+            &self,
+            q: UniqueTensor,
+            qo_indptr: UniqueTensor,
+            paged_kv_data: UniqueTensor,
+            paged_kv_indptr: UniqueTensor,
+            paged_kv_indices: UniqueTensor,
+            paged_kv_last_page_len: UniqueTensor,
+            causal: bool,
+            pos_encoding_mode: u32,
+            allow_fp16_qk_reduction: bool,
+            sm_scale: f32,
+            rope_scale: f32,
+            rope_theta: f32,
+            return_lse: bool,
+        ) -> Vec<UniqueTensor>;
+
         // fn single_decode_with_kv_cache(
         //     q: TorchTensorPtr,
         //     k: TorchTensorPtr,

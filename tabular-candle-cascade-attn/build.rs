@@ -1,3 +1,4 @@
+use std::fs;
 // Build script to run nvcc and generate the C glue code for launching the flash-attention kernel.
 // The cuda build time is very long so one can set the CANDLE_FLASH_ATTN_BUILD_DIR environment
 // variable in order to cache the compiled artifacts and avoid recompiling too often.
@@ -10,7 +11,6 @@ const KERNEL_FILES: [&str; 7] = [
     "flashinfer/csrc/batch_decode.cu",
     "flashinfer/csrc/batch_prefill.cu",
     "flashinfer/csrc/cascade.cu",
-    "flashinfer/csrc/flashinfer_ops.cu",
     "flashinfer/csrc/page.cu",
     "flashinfer/csrc/single_decode.cu",
     "flashinfer/csrc/single_prefill.cu",
@@ -83,6 +83,8 @@ fn main() -> Result<()> {
     } else {
         true
     };
+    let out_csrc_dir = out_dir.join("flashinfer/csrc");
+    fs::create_dir_all(out_csrc_dir.to_str().unwrap())?;
     if should_compile {
         cu_files
             .par_iter()
@@ -96,10 +98,17 @@ fn main() -> Result<()> {
                     .args(["-o", obj_file.to_str().unwrap()])
                     .args(["--default-stream", "per-thread"])
                     .arg("-Icutlass/include")
+                    .arg("-Ikernels/flashinfer/include")
+                    .arg("-I/home/user/datadisk-disk-elan/libtorch/libtorch/include")
+                    .arg("-I/home/user/datadisk-disk-elan/libtorch/libtorch/include/torch/csrc/api/include")
+                    .arg("-I/usr/include/python3.10/")
                     .arg("-U__CUDA_NO_HALF_OPERATORS__")
                     .arg("-U__CUDA_NO_HALF_CONVERSIONS__")
                     .arg("-U__CUDA_NO_HALF2_OPERATORS__")
-                    .arg("-U__CUDA_NO_BFLOAT16_CONVERSIONS__")
+                    //.arg("-U__CUDA_NO_BFLOAT16_CONVERSIONS__")
+                    .arg("-DFLASHINFER_ENABLE_BF16")
+                    .arg("-DFLASHINFER_ENABLE_FP8")
+                    .arg("-DC10_USING_CUSTOM_GENERATED_MACROS")
                     .arg("--expt-relaxed-constexpr")
                     .arg("--expt-extended-lambda")
                     .arg("--use_fast_math")
@@ -151,13 +160,18 @@ fn main() -> Result<()> {
     println!("cargo:rustc-link-lib=dylib=stdc++");
 
     cxx_build::bridge("src/ffi.rs")
-            .file("kernels/candle/flashinfer_candle_op.cc")
-            .std("c++14")
-            .compile("tabular-candle-cascade-attn");
+        .file("kernels/candle/flashinfer_candle_op.cc")
+        .std("c++17")
+        .compile("tabular-candle-cascade-attn");
 
-        println!("cargo:rerun-if-changed=src/ffi.rs");
-        println!("cargo:rerun-if-changed=kernels/candle/flashinfer_candle_op.cc");
-        println!("cargo:rerun-if-changed=kernels/candle/flashinfer_candle_op.h");
+    println!("cargo:rerun-if-changed=src/ffi.rs");
+    println!("cargo:rerun-if-changed=kernels/candle/flashinfer_candle_op.cc");
+    println!("cargo:rerun-if-changed=kernels/candle/flashinfer_candle_op.h");
+
+    println!("cargo:rustc-link-search=/Users/elans2/workspace/light/libtorch/libtorch/lib");
+    println!("cargo:rustc-link-lib=torch");
+    println!("cargo:rustc-link-lib=torch_cpu");
+    println!("cargo:rustc-link-lib=c10");
 
     Ok(())
 }
@@ -264,7 +278,6 @@ fn compute_cap() -> Result<usize> {
             "CUDA compute cap {compute_cap} is higher than the highest gpu code from nvcc {max_nvcc_code}"
         );
     }
-
 
     Ok(compute_cap)
 }
