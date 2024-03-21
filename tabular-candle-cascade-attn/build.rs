@@ -7,7 +7,7 @@ use rayon::prelude::*;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-const KERNEL_FILES: [&str; 7] = [
+const KERNEL_FILES: [&str; 6] = [
     "flashinfer/csrc/batch_decode.cu",
     "flashinfer/csrc/batch_prefill.cu",
     "flashinfer/csrc/cascade.cu",
