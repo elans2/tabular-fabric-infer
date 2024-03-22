@@ -18,10 +18,11 @@ use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::generation::LogitsProcessor;
 use tokenizers::Tokenizer;
-use crate::base::{GeneralInnerModelInfer, InferContext};
+use crate::base::{ModelInfer, InferContext};
 use crate::utils::token_output_stream::TokenOutputStream;
 use structmap::FromMap;
 use structmap_derive::FromMap;
+use crate::models::ggml::GgmlLLamaModelInfer;
 
 pub fn device(cpu: bool) -> Result<Device, InferError> {
     if cpu {
@@ -94,6 +95,9 @@ pub struct CandleQwenModelInfer {
     pipeline: Arc<RefCell<Option<CandleQwenTextGeneration>>>,
 }
 
+unsafe impl Sync for CandleQwenModelInfer {}
+unsafe impl Send for CandleQwenModelInfer {}
+
 impl CandleQwenModelInfer {
     pub fn new() -> Self {
         Self {
@@ -102,7 +106,12 @@ impl CandleQwenModelInfer {
     }
 }
 
-impl GeneralInnerModelInfer for CandleQwenModelInfer {
+impl ModelInfer for CandleQwenModelInfer {
+
+    fn file_resources(&self) -> Vec<String> {
+        vec!["tokenizer_file".to_string(), "weight_files".to_string()]
+    }
+
     fn load(
         &self,
         options: HashMap<String, String>,

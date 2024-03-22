@@ -18,10 +18,12 @@ use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::generation::LogitsProcessor;
 use tokenizers::Tokenizer;
-use crate::base::{GeneralInnerModelInfer, InferContext};
+use crate::base::{ModelInfer, InferContext};
 use crate::utils::token_output_stream::TokenOutputStream;
 use structmap::FromMap;
 use structmap_derive::FromMap;
+use crate::models::ggml::GgmlLLamaModelInfer;
+use crate::models::mistral::CandleMistralModelInfer;
 
 pub fn device(cpu: bool) -> Result<Device, InferError> {
     if cpu {
@@ -58,8 +60,6 @@ struct CandlePhiArg {
 
     weight_files: String,
 
-    cache_dir: String,
-
     quantized: bool,
 
     /// Penalty to be applied for repeating tokens, 1. means no penalty.
@@ -74,7 +74,6 @@ impl Default for CandlePhiArg {
         Self {
             tokenizer_file: "".to_string(),
             weight_files: "".to_string(),
-            cache_dir: "/tmp".to_string(),
             cpu: true,
             use_flash_attn: false,
             temperature: 0.0,
@@ -92,6 +91,9 @@ pub struct CandlePhiModelInfer {
     pipeline: Arc<RefCell<Option<CandlePhiTextGeneration>>>,
 }
 
+unsafe impl Sync for CandlePhiModelInfer {}
+unsafe impl Send for CandlePhiModelInfer {}
+
 impl CandlePhiModelInfer {
     pub fn new() -> Self {
         Self {
@@ -100,7 +102,16 @@ impl CandlePhiModelInfer {
     }
 }
 
-impl GeneralInnerModelInfer for CandlePhiModelInfer {
+impl ModelInfer for CandlePhiModelInfer {
+
+    fn file_resources(&self) -> Vec<String> {
+        vec![
+            "tokenizer_file".to_string(),
+            "config_file".to_string(),
+            "weight_files".to_string(),
+        ]
+    }
+
     fn load(
         &self,
         options: HashMap<String, String>,

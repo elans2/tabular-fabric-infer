@@ -19,10 +19,11 @@ use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::generation::LogitsProcessor;
 use tokenizers::Tokenizer;
-use crate::base::{GeneralInnerModelInfer, InferContext};
+use crate::base::{ModelInfer, InferContext};
 use crate::utils::token_output_stream::TokenOutputStream;
 use structmap::FromMap;
 use structmap_derive::FromMap;
+use crate::models::ggml::GgmlLLamaModelInfer;
 
 pub fn device(cpu: bool) -> Result<Device, InferError> {
     if cpu {
@@ -90,6 +91,9 @@ pub struct CandleMistralModelInfer {
     pipeline: Arc<RefCell<Option<CandleMistralTextGeneration>>>,
 }
 
+unsafe impl Sync for CandleMistralModelInfer {}
+unsafe impl Send for CandleMistralModelInfer {}
+
 impl CandleMistralModelInfer {
     pub fn new() -> Self {
         Self {
@@ -98,7 +102,15 @@ impl CandleMistralModelInfer {
     }
 }
 
-impl GeneralInnerModelInfer for CandleMistralModelInfer {
+impl ModelInfer for CandleMistralModelInfer {
+
+    fn file_resources(&self) -> Vec<String> {
+        vec![
+            "tokenizer_file".to_string(),
+            "weight_files".to_string(),
+        ]
+    }
+
     fn load(
         &self,
         options: HashMap<String, String>,

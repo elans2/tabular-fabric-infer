@@ -15,7 +15,10 @@ impl Default for InferContext {
     }
 }
 
-pub trait GeneralInnerModelInfer {
+pub trait ModelInfer {
+
+    fn file_resources(&self) -> Vec<String>;
+
     fn load(
         &self,
         options: HashMap<String, String>,
