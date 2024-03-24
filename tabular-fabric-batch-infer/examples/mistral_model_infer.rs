@@ -3,6 +3,7 @@ use arrow::array::UInt64Array;
 use arrow::record_batch::RecordBatch;
 
 use std::collections::HashMap;
+use std::env;
 use std::sync::Arc;
 use std::time::Duration;
 use tabular_fabric_batch_infer::base::{InferContext, ModelInfer};
@@ -25,13 +26,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let infer_context = InferContext::default();
 
     let mut load_options = HashMap::new();
+
+    let model_repo = env::var("MODEL_REPOS").expect("model repo is not set");
+
     load_options.insert(
         "tokenizer_file".to_string(),
-        "/Users/elans2/workspace/light/models/Qwen-7B-Instruct-v0.2/tokenizer.json".to_string(),
+        format!("{}/Mistral-7B-Instruct-v0.2/tokenizer.json", model_repo),
     );
     load_options.insert(
         "weight_files".to_string(),
-        "/Users/elans2/workspace/light/models/Qwen-7B-Instruct-v0.2/model.safetensors".to_string(),
+        format!(
+            "{}/Mistral-7B-Instruct-v0.2/model-00001-of-00003.safetensors,{}/Mistral-7B-Instruct-v0.2/model-00002-of-00003.safetensors,{}/Mistral-7B-Instruct-v0.2/model-00003-of-00003.safetensors",
+            model_repo, model_repo, model_repo
+        ),
     );
 
     infer.load(load_options);

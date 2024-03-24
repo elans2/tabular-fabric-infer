@@ -3,6 +3,7 @@ use arrow::array::UInt64Array;
 use arrow::record_batch::RecordBatch;
 
 use std::collections::HashMap;
+use std::env;
 use std::sync::Arc;
 use std::time::Duration;
 use tabular_fabric_batch_infer::base::{InferContext, ModelInfer};
@@ -25,9 +26,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let infer_context = InferContext::default();
 
     let mut load_options = HashMap::new();
+
+    let model_repo = env::var("MODEL_REPOS").expect("model repo is not set");
+
     load_options.insert(
         "model_file".to_string(),
-        "/Users/elans2/workspace/light/models/Phi1.5-1.8B/model.safetensors".to_string(),
+        format!("{}/model.safetensors", model_repo),
     );
 
     infer.load(load_options);

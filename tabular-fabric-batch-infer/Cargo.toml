@@ -16,17 +16,20 @@ arrow = { workspace = true }
 thiserror = { version = "1.0.50" }
 anyhow = { workspace = true }
 itertools = { workspace = true}
+structmap = { workspace = true }
+structmap-derive = { workspace = true }
+serde_json = { workspace = true }
+
+#candle-core = {  git = "https://github.com/huggingface/candle.git", branch = "main", features = ["default"] }
+#candle-transformers = {  git = "https://github.com/huggingface/candle.git", branch = "main", features = ["default"] }
+#candle-nn = {  git = "https://github.com/huggingface/candle.git", branch = "main", features = ["default"] }
 
 candle-core = {  version = "0.4.1", features = ["default"] }
 candle-transformers = {  version = "0.4.1", features = ["default"] }
 candle-nn = {  version = "0.4.1", features = ["default"] }
 tokenizers = { version = "0.13.3" }
-serde_json = "1.0.114"
 
-structmap = { version = "0.1.6" }
-structmap-derive = { version = "0.1.6" }
-
-llama_cpp_rs = { path = "/Users/elans2/workspace/rust-llama.cpp"}
+llama_cpp_rs = { path = "../rust-llama.cpp/"}
 
 
 [features]

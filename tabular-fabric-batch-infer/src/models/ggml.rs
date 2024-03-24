@@ -136,6 +136,8 @@ impl ModelInfer for GgmlLLamaModelInfer {
         let mut model_options = ModelOptions::default();
         //model_options.n_gpu_layers = 33;
         //model_options.main_gpu = "cuda".to_string();
+        println!("{}", model_file);
+        println!("{:#?}", model_options);
         let llama = LLama::new(model_file.as_str().into(), &model_options).unwrap();
 
         let mut self_pipeline = self.pipeline.clone();
