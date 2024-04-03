@@ -19,6 +19,8 @@ itertools = { workspace = true}
 structmap = { workspace = true }
 structmap-derive = { workspace = true }
 serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 #candle-core = {  git = "https://github.com/huggingface/candle.git", branch = "main", features = ["default"] }
 #candle-transformers = {  git = "https://github.com/huggingface/candle.git", branch = "main", features = ["default"] }
@@ -30,6 +32,7 @@ candle-nn = {  version = "0.4.1", features = ["default"] }
 tokenizers = { version = "0.13.3" }
 
 llama_cpp_rs = { path = "../rust-llama.cpp/"}
+log = "0.4.20"
 
 
 [features]

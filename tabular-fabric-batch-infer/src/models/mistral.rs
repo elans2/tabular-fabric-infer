@@ -23,6 +23,8 @@ use crate::base::{ModelInfer, InferContext};
 use crate::utils::token_output_stream::TokenOutputStream;
 use structmap::FromMap;
 use structmap_derive::FromMap;
+use tracing::{debug, info};
+use crate::models::constants::RESULT_COLUMN_NAME;
 use crate::models::ggml::GgmlLLamaModelInfer;
 
 pub fn device(cpu: bool) -> Result<Device, InferError> {
@@ -31,7 +33,7 @@ pub fn device(cpu: bool) -> Result<Device, InferError> {
     } else {
         let device = Device::cuda_if_available(0)?;
         if !device.is_cuda() {
-            println!("Running on CPU, to run on GPU, build this example with `--features cuda`");
+            info!("Running on CPU, to run on GPU, build this example with `--features cuda`");
         }
         Ok(device)
     }
@@ -53,7 +55,6 @@ struct CandleMistralArg {
     /// The seed to use when generating random samples.
     seed: u64,
 
-    /// The length of the sample to generate (in tokens).
     sample_len: u64,
 
     tokenizer_file: String,
@@ -78,8 +79,8 @@ impl Default for CandleMistralArg {
             use_flash_attn: false,
             temperature: 0.0,
             top_p: 100 as f64,
+            sample_len: 500,
             seed: 299792458,
-            sample_len: 100,
             quantized: false,
             repeat_penalty: 1.0,
             repeat_last_n: 64,
@@ -121,43 +122,36 @@ impl ModelInfer for CandleMistralModelInfer {
         }
         let arg = CandleMistralArg::from_stringmap(arg);
 
-        println!(
+        info!(
             "avx: {}, neon: {}, simd128: {}, f16c: {}",
             candle_core::utils::with_avx(),
             candle_core::utils::with_neon(),
             candle_core::utils::with_simd128(),
             candle_core::utils::with_f16c()
         );
-        println!(
+        info!(
             "temp: {:.2} repeat-penalty: {:.2} repeat-last-n: {}",
             arg.temperature,
             arg.repeat_penalty,
             arg.repeat_last_n
         );
 
-        println!("inner 1");
         let tokenizer_file = std::path::PathBuf::from(
             arg.tokenizer_file,
         );
-        println!("inner 2");
 
         let weight_files = arg.weight_files.split(",").map(|x| std::path::PathBuf::from(x)).collect::<Vec<std::path::PathBuf>>();
 
-        println!("inner 3");
         let tokenizer = Tokenizer::from_file(tokenizer_file).map_err(anyhow::Error::msg)?;
 
-        println!("inner 4");
         let config = Config::config_7b_v0_1(arg.use_flash_attn);
-        println!("inner 5");
         let (model, device) = if arg.quantized {
-            println!("inner 6");
             let filename = &weight_files[0];
             let device = Device::new_metal(0)?;
             let vb = candle_transformers::quantized_var_builder::VarBuilder::from_gguf(filename, &device)?;
             let model = QModel::new(&config, vb)?;
             (ModelMode::Quantized(model), Device::Cpu)
         } else {
-            println!("inner 7");
             let device = device(arg.cpu)?;
             let dtype = if device.is_cuda() {
                 DType::BF16
@@ -169,7 +163,6 @@ impl ModelInfer for CandleMistralModelInfer {
             (ModelMode::Normal(model), device)
         };
 
-        println!("inner 8");
         let mut pipeline = CandleMistralTextGeneration::new(
             model,
             tokenizer,
@@ -181,11 +174,9 @@ impl ModelInfer for CandleMistralModelInfer {
             &device,
         );
 
-        println!("inner 9");
         let mut self_pipeline = self.pipeline.clone();
         let mut self_pipeline = self_pipeline.borrow_mut();
         self_pipeline.get_or_insert(pipeline);
-        println!("inner 10");
         Ok(true)
     }
 
@@ -195,7 +186,12 @@ impl ModelInfer for CandleMistralModelInfer {
         context: &InferContext,
         options: HashMap<String, String>,
     ) -> Result<RecordBatch, InferError> {
-        //let result = pipeline.run(&args.prompt, args.sample_len)?;
+        let mut arg = StringMap::new();
+        for kv in options.into_iter() {
+            arg.insert(kv.0, kv.1);
+        }
+        let arg = CandleMistralArg::from_stringmap(arg);
+
         let array = batch.column(0);
         let values = array.as_any().downcast_ref::<StringArray>().unwrap();
         let mut pipeline = self.pipeline.clone();
@@ -205,13 +201,13 @@ impl ModelInfer for CandleMistralModelInfer {
         let mut result_values = vec![];
         for value in values.iter() {
             let value = value.unwrap();
-            let result_value = pipeline.gen(value, 100).unwrap();
+            let result_value = pipeline.gen(value, arg.sample_len as usize).unwrap();
             let result_value = result_value.join(" ");
             result_values.push(result_value);
         }
 
         let result_batch = RecordBatch::try_from_iter(vec![(
-            "col",
+            RESULT_COLUMN_NAME,
             Arc::new(StringArray::from(result_values)) as _,
         )])
         .unwrap();
@@ -272,7 +268,7 @@ impl CandleMistralTextGeneration {
             .to_vec();
         for &t in tokens.iter() {
             if let Some(t) = self.tokenizer.next_token(t)? {
-                print!("{t}")
+                debug!("{t}")
             }
         }
 
@@ -289,34 +285,23 @@ impl CandleMistralTextGeneration {
         for index in 0..sample_len {
             let context_size = if index > 0 { 1 } else { tokens.len() };
             let start_pos = tokens.len().saturating_sub(context_size);
-            println!("start pos {}", start_pos);
             let ctxt = &tokens[start_pos..];
             let input = Tensor::new(ctxt, &self.device)?;
-            println!("input1 {:#?}", input.shape());
             let input = input.unsqueeze(0)?;
             let input2 = input.clone();
-            //println!("input2 {:#?}", input.shape());
             let input3 = Tensor::cat(&[input.clone(), input2], 0)?;
-            println!("input3 {:#?}", input3.shape());
             let input = input3.clone();
-            println!("start_pos {}", start_pos);
             let logits = match &mut self.model {
                 ModelMode::Normal(m) => m.forward(&input, start_pos)?,
                 ModelMode::Quantized(m) => m.forward(&input, start_pos)?,
             };
-            println!("inf 10");
-            println!("inf2 A {:#?}", logits.shape());
 
             let logits = logits.get(0)?;
-            println!("inf2 B {:#?}", logits.shape());
 
             let logits = logits.squeeze(0)?.to_dtype(DType::F32)?;
-            println!("inf2 C {:#?}", logits.shape());
             let logits = if self.repeat_penalty == 1. {
-                println!("pent1");
                 logits
             } else {
-                println!("pent2");
                 let start_at = tokens.len().saturating_sub(self.repeat_last_n);
                 candle_transformers::utils::apply_repeat_penalty(
                     &logits,
@@ -332,7 +317,6 @@ impl CandleMistralTextGeneration {
                 break;
             }
             if let Some(t) = self.tokenizer.next_token(next_token)? {
-                print!("{}", t);
                 result_tokens.push(t);
             }
         }

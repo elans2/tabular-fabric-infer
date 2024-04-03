@@ -4,13 +4,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 pub struct InferContext {
-    pub share_slices: HashMap<String, String>,
+    pub share_store: HashMap<String, String>,
 }
 
 impl Default for InferContext {
     fn default() -> Self {
         InferContext {
-            share_slices: Default::default(),
+            share_store: Default::default(),
         }
     }
 }

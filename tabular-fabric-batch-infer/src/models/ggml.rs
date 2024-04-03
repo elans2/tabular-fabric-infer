@@ -24,12 +24,15 @@ use tokenizers::Tokenizer;
 use structmap::FromMap;
 use structmap_derive::FromMap;
 
+use tracing::info;
+
 use llama_cpp_rs::{
     options::{ModelOptions, PredictOptions},
     LLama,
 };
 use crate::base::{InferContext, ModelInfer};
 use crate::errors::InferError;
+use crate::models::constants::RESULT_COLUMN_NAME;
 
 pub fn device(cpu: bool) -> Result<Device, InferError> {
     if cpu {
@@ -37,7 +40,7 @@ pub fn device(cpu: bool) -> Result<Device, InferError> {
     } else {
         let device = Device::cuda_if_available(0)?;
         if !device.is_cuda() {
-            println!("Running on CPU, to run on GPU, build this example with `--features cuda`");
+            info!("Running on CPU, to run on GPU, build this example with `--features cuda`");
         }
         Ok(device)
     }
@@ -59,7 +62,6 @@ struct GgmlLLamaArg {
     /// The seed to use when generating random samples.
     seed: u64,
 
-    /// The length of the sample to generate (in tokens).
     sample_len: u64,
 
     model_file: String,
@@ -82,7 +84,7 @@ impl Default for GgmlLLamaArg {
             temperature: 0.0,
             top_p: 100 as f64,
             seed: 299792458,
-            sample_len: 100,
+            sample_len: 500,
             quantized: true,
             repeat_penalty: 1.0,
             repeat_last_n: 64,
@@ -120,24 +122,22 @@ impl ModelInfer for GgmlLLamaModelInfer {
             arg.insert(kv.0, kv.1);
         }
         let arg = crate::models::ggml::GgmlLLamaArg::from_stringmap(arg);
-        println!(
+        info!(
             "avx: {}, neon: {}, simd128: {}, f16c: {}",
             candle_core::utils::with_avx(),
             candle_core::utils::with_neon(),
             candle_core::utils::with_simd128(),
             candle_core::utils::with_f16c()
         );
-        println!(
+        info!(
             "temp: {:.2} repeat-penalty: {:.2} repeat-last-n: {}",
             arg.temperature, arg.repeat_penalty, arg.repeat_last_n
         );
 
         let model_file = arg.model_file.clone();
         let mut model_options = ModelOptions::default();
-        //model_options.n_gpu_layers = 33;
-        //model_options.main_gpu = "cuda".to_string();
-        println!("{}", model_file);
-        println!("{:#?}", model_options);
+        info!("load model file: {}", model_file);
+        info!("load model options: {:#?}", model_options);
         let llama = LLama::new(model_file.as_str().into(), &model_options).unwrap();
 
         let mut self_pipeline = self.pipeline.clone();
@@ -153,7 +153,12 @@ impl ModelInfer for GgmlLLamaModelInfer {
         context: &InferContext,
         options: HashMap<String, String>,
     ) -> Result<RecordBatch, InferError> {
-        //let result = pipeline.run(&args.prompt, args.sample_len)?;
+        let mut arg = StringMap::new();
+        for kv in options.into_iter() {
+            arg.insert(kv.0, kv.1);
+        }
+        let arg = crate::models::ggml::GgmlLLamaArg::from_stringmap(arg);
+
         let array = batch.column(0);
         let values = array.as_any().downcast_ref::<StringArray>().unwrap();
         let mut pipeline = self.pipeline.clone();
@@ -169,7 +174,7 @@ impl ModelInfer for GgmlLLamaModelInfer {
             let predict_options = PredictOptions {
                 tokens: 0,
                 threads: 4,
-                top_k: 90,
+                top_k: arg.sample_len as i32,
                 top_p: 0.86,
                 token_callback: Some(Box::new(move |token| {
                     callback_result_tokens
@@ -190,7 +195,7 @@ impl ModelInfer for GgmlLLamaModelInfer {
         }
 
         let result_batch = RecordBatch::try_from_iter(vec![(
-            "col",
+            RESULT_COLUMN_NAME,
             Arc::new(StringArray::from(result_values)) as _,
         )])
             .unwrap();
