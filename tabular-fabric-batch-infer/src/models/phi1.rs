@@ -11,7 +11,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use candle_transformers::models::qwen2::{Config, Model};
+use candle_transformers::models::phi::{Config, Model};
 
 use crate::errors::InferError;
 use candle_core::{DType, Device, Tensor};
@@ -22,9 +22,9 @@ use crate::base::{ModelInfer, InferContext};
 use crate::models::utils::token_output_stream::TokenOutputStream;
 use structmap::FromMap;
 use structmap_derive::FromMap;
-use crate::models::constants::RESULT_COLUMN_NAME;
-use crate::models::ggml::GgmlLLamaModelInfer;
 use tracing::{debug, info};
+use crate::models::ggml::GgmlLLamaModelInfer;
+use crate::models::mistral::CandleMistralModelInfer;
 
 pub fn device(cpu: bool) -> Result<Device, InferError> {
     if cpu {
@@ -39,7 +39,7 @@ pub fn device(cpu: bool) -> Result<Device, InferError> {
 }
 
 #[derive(FromMap)]
-struct CandleQwenArg {
+struct CandlePhiArg {
     /// Run on CPU rather than on GPU.
     cpu: bool,
 
@@ -56,11 +56,11 @@ struct CandleQwenArg {
 
     sample_len: u64,
 
-    config_file: String,
-
     tokenizer_file: String,
 
     weight_files: String,
+
+    config_file: String,
 
     quantized: bool,
 
@@ -71,17 +71,17 @@ struct CandleQwenArg {
     repeat_last_n: u64,
 }
 
-impl Default for CandleQwenArg {
+impl Default for CandlePhiArg {
     fn default() -> Self {
         Self {
-            config_file: "".to_string(),
             tokenizer_file: "".to_string(),
             weight_files: "".to_string(),
+            config_file: "".to_string(),
             cpu: true,
             use_flash_attn: false,
             temperature: 0.0,
-            sample_len: 500,
             top_p: 100 as f64,
+            sample_len: 500,
             seed: 299792458,
             quantized: false,
             repeat_penalty: 1.0,
@@ -90,17 +90,14 @@ impl Default for CandleQwenArg {
     }
 }
 
-
-
-
-pub struct CandleQwenModelInfer {
-    pipeline: Arc<RefCell<Option<CandleQwenTextGeneration>>>,
+pub struct CandlePhiModelInfer {
+    pipeline: Arc<RefCell<Option<CandlePhiTextGeneration>>>,
 }
 
-unsafe impl Sync for CandleQwenModelInfer {}
-unsafe impl Send for CandleQwenModelInfer {}
+unsafe impl Sync for CandlePhiModelInfer {}
+unsafe impl Send for CandlePhiModelInfer {}
 
-impl CandleQwenModelInfer {
+impl CandlePhiModelInfer {
     pub fn new() -> Self {
         Self {
             pipeline: Arc::new(RefCell::new(None)),
@@ -108,10 +105,14 @@ impl CandleQwenModelInfer {
     }
 }
 
-impl ModelInfer for CandleQwenModelInfer {
+impl ModelInfer for CandlePhiModelInfer {
 
     fn file_resources(&self) -> Vec<String> {
-        vec!["tokenizer_file".to_string(), "weight_files".to_string()]
+        vec![
+            "tokenizer_file".to_string(),
+            "config_file".to_string(),
+            "weight_files".to_string(),
+        ]
     }
 
     fn load(
@@ -122,7 +123,7 @@ impl ModelInfer for CandleQwenModelInfer {
         for kv in options.into_iter() {
             arg.insert(kv.0, kv.1);
         }
-        let arg = CandleQwenArg::from_stringmap(arg);
+        let arg = CandlePhiArg::from_stringmap(arg);
 
         info!(
             "avx: {}, neon: {}, simd128: {}, f16c: {}",
@@ -163,7 +164,7 @@ impl ModelInfer for CandleQwenModelInfer {
             (ModelMode::Normal(model), device)
         };
 
-        let mut pipeline = CandleQwenTextGeneration::new(
+        let mut pipeline = CandlePhiTextGeneration::new(
             model,
             tokenizer,
             arg.seed,
@@ -190,7 +191,7 @@ impl ModelInfer for CandleQwenModelInfer {
         for kv in options.into_iter() {
             arg.insert(kv.0, kv.1);
         }
-        let arg = CandleQwenArg::from_stringmap(arg);
+        let arg = CandlePhiArg::from_stringmap(arg);
 
         let array = batch.column(0);
         let values = array.as_any().downcast_ref::<StringArray>().unwrap();
@@ -207,7 +208,7 @@ impl ModelInfer for CandleQwenModelInfer {
         }
 
         let result_batch = RecordBatch::try_from_iter(vec![(
-            RESULT_COLUMN_NAME,
+            "col",
             Arc::new(StringArray::from(result_values)) as _,
         )])
             .unwrap();
@@ -220,7 +221,7 @@ enum ModelMode {
     Normal(Model),
 }
 
-pub struct CandleQwenTextGeneration {
+pub struct CandlePhiTextGeneration {
     model: ModelMode,
     device: Device,
     tokenizer: TokenOutputStream,
@@ -229,7 +230,7 @@ pub struct CandleQwenTextGeneration {
     repeat_last_n: usize,
 }
 
-impl CandleQwenTextGeneration {
+impl CandlePhiTextGeneration {
     #[allow(clippy::too_many_arguments)]
     fn new(
         model: ModelMode,
@@ -269,6 +270,7 @@ impl CandleQwenTextGeneration {
                 debug!("{t}")
             }
         }
+
         let mut generated_tokens = 0usize;
         let eos_token = match self.tokenizer.get_token("<|endoftext|>") {
             Some(token) => token,
@@ -276,7 +278,7 @@ impl CandleQwenTextGeneration {
                 return Err(InferError::GenericError {
                     msg: "cannot find the <|endoftext|> token".to_string(),
                 })
-            },
+            }
         };
         let mut result_tokens = vec![];
         for index in 0..sample_len {
@@ -289,7 +291,7 @@ impl CandleQwenTextGeneration {
             let input3 = Tensor::cat(&[input.clone(), input2], 0)?;
             let input = input3.clone();
             let logits = match &mut self.model {
-                ModelMode::Normal(m) => m.forward(&input, start_pos)?,
+                ModelMode::Normal(m) => m.forward(&input)?,
             };
 
             let logits = logits.get(0)?;

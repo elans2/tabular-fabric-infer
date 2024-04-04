@@ -20,12 +20,12 @@ pub trait ModelInfer {
     fn file_resources(&self) -> Vec<String>;
 
     fn load(
-        &self,
+        &mut self,
         options: HashMap<String, String>,
     ) -> Result<bool, InferError>;
 
     fn infer(
-        &self,
+        &mut self,
         batch: &RecordBatch,
         context: &InferContext,
         options: HashMap<String, String>,

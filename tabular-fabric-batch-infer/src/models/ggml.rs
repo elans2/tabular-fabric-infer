@@ -114,7 +114,7 @@ impl ModelInfer for GgmlLLamaModelInfer {
     }
 
     fn load(
-        &self,
+        &mut self,
         options: HashMap<String, String>,
     ) -> Result<bool, InferError> {
         let mut arg = StringMap::new();
@@ -148,7 +148,7 @@ impl ModelInfer for GgmlLLamaModelInfer {
     }
 
     fn infer(
-        &self,
+        &mut self,
         batch: &RecordBatch,
         context: &InferContext,
         options: HashMap<String, String>,

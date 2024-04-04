@@ -20,12 +20,13 @@ use candle_nn::VarBuilder;
 use candle_transformers::generation::LogitsProcessor;
 use tokenizers::Tokenizer;
 use crate::base::{ModelInfer, InferContext};
-use crate::utils::token_output_stream::TokenOutputStream;
+use crate::models::utils::token_output_stream::TokenOutputStream;
 use structmap::FromMap;
 use structmap_derive::FromMap;
 use tracing::{debug, info};
 use crate::models::constants::RESULT_COLUMN_NAME;
 use crate::models::ggml::GgmlLLamaModelInfer;
+use itertools::Itertools;
 
 pub fn device(cpu: bool) -> Result<Device, InferError> {
     if cpu {
@@ -113,7 +114,7 @@ impl ModelInfer for CandleMistralModelInfer {
     }
 
     fn load(
-        &self,
+        &mut self,
         options: HashMap<String, String>,
     ) -> Result<bool, InferError> {
         let mut arg = StringMap::new();
@@ -181,7 +182,7 @@ impl ModelInfer for CandleMistralModelInfer {
     }
 
     fn infer(
-        &self,
+        &mut self,
         batch: &RecordBatch,
         context: &InferContext,
         options: HashMap<String, String>,
@@ -198,20 +199,37 @@ impl ModelInfer for CandleMistralModelInfer {
         let mut pipeline = pipeline.borrow_mut();
         let mut pipeline = pipeline.as_mut().unwrap();
 
-        let mut result_values = vec![];
-        for value in values.iter() {
-            let value = value.unwrap();
-            let result_value = pipeline.gen(value, arg.sample_len as usize).unwrap();
-            let result_value = result_value.join(" ");
-            result_values.push(result_value);
+        let values = values.iter().collect::<Vec<_>>();
+        let mut pos_list = vec![];
+        let mut value_list = vec![];
+        for (pos, value) in values.iter().enumerate() {
+            if value.is_none() {
+                continue;
+            }
+            if let Some(value) = value {
+                pos_list.push(pos);
+                value_list.push(value.clone().to_string());
+            }
         }
 
+        let mut gen_value_list = vec![];
+        for chunk_values in &value_list.into_iter().chunks(100) {
+            let chunk_values= chunk_values.collect_vec();
+            let mut chunk_result_values = pipeline.gen(&chunk_values, arg.sample_len as usize).unwrap();
+            gen_value_list.append(&mut chunk_result_values);
+        }
+
+        let mut result_value_list = vec![];
+        for (pos, gen_value) in pos_list.iter().zip(gen_value_list.iter()) {
+            for _ in 0 .. (pos - result_value_list.len()) {
+                result_value_list.push("".to_string());
+            }
+            result_value_list.push(gen_value.to_owned().join(""));
+        }
         let result_batch = RecordBatch::try_from_iter(vec![(
             RESULT_COLUMN_NAME,
-            Arc::new(StringArray::from(result_values)) as _,
-        )])
-        .unwrap();
-
+            Arc::new(StringArray::from(result_value_list)) as _,
+        )]).map_err(|e| InferError::ArrowError { source: e })?;
         Ok(result_batch)
     }
 }
@@ -253,25 +271,23 @@ impl CandleMistralTextGeneration {
         }
     }
 
-    fn gen(&mut self, prompt: &str, sample_len: usize) -> Result<Vec<String>, InferError> {
+    fn gen(&mut self, prompts: &Vec<String>, sample_len: usize) -> Result<Vec<Vec<String>>, InferError> {
         match &mut self.model {
             ModelMode::Normal(m) => m.clear_kv_cache(),
             ModelMode::Quantized(m) => m.clear_kv_cache(),
         };
         self.tokenizer.clear();
-        let mut tokens = self
-            .tokenizer
-            .tokenizer()
-            .encode(prompt, true)
-            .map_err(anyhow::Error::msg)?
-            .get_ids()
-            .to_vec();
-        for &t in tokens.iter() {
-            if let Some(t) = self.tokenizer.next_token(t)? {
-                debug!("{t}")
-            }
+        let mut batch_tokens = vec![];
+        for prompt in prompts {
+            let tokens = self
+                .tokenizer
+                .tokenizer()
+                .encode(prompt.to_owned(), true)
+                .map_err(anyhow::Error::msg)?
+                .get_ids()
+                .to_vec();
+            batch_tokens.push(tokens);
         }
-
         let mut generated_tokens = 0usize;
         let eos_token = match self.tokenizer.get_token("</s>") {
             Some(token) => token,
@@ -281,47 +297,65 @@ impl CandleMistralTextGeneration {
                 })
             }
         };
-        let mut result_tokens = vec![];
+        let pad_token = match self.tokenizer.get_token("<unk>") {
+            Some(token) => token,
+            None => {
+                return Err(InferError::GenericError {
+                    msg: "cannot find the <unk> token".to_string(),
+                })
+            }
+        };
+        let mut max_len = batch_tokens.clone().into_iter().map(|ts| ts.len()).max();
+        if let Some(max_len) = max_len {
+            for tokens in &mut batch_tokens {
+                for _ in 0..(max_len - tokens.len()) {
+                    tokens.push(pad_token);
+                }
+            }
+        }
+        let mut result_tokens: Vec<Vec<String>> = vec![];
         for index in 0..sample_len {
-            let context_size = if index > 0 { 1 } else { tokens.len() };
-            let start_pos = tokens.len().saturating_sub(context_size);
-            let ctxt = &tokens[start_pos..];
-            let input = Tensor::new(ctxt, &self.device)?;
-            let input = input.unsqueeze(0)?;
-            let input2 = input.clone();
-            let input3 = Tensor::cat(&[input.clone(), input2], 0)?;
-            let input = input3.clone();
+            let context_size = if index > 0 { 1 } else { result_tokens[0].len() };
+            let start_pos = result_tokens[0].len().saturating_sub(context_size);
+            let mut row_inputs = vec![];
+            for batch_idx in 0..batch_tokens.len() {
+                let ctxt = &batch_tokens[batch_idx][start_pos..];
+                let row_input = Tensor::new(ctxt, &self.device)?;
+                let row_input = row_input.unsqueeze(0)?;
+                row_inputs.push(row_input);
+            }
+            let batch_input = Tensor::cat(&row_inputs, 0)?;
             let logits = match &mut self.model {
-                ModelMode::Normal(m) => m.forward(&input, start_pos)?,
-                ModelMode::Quantized(m) => m.forward(&input, start_pos)?,
+                ModelMode::Normal(m) => m.forward(&batch_input, start_pos)?,
+                ModelMode::Quantized(m) => m.forward(&batch_input, start_pos)?,
             };
 
             let logits = logits.get(0)?;
 
             let logits = logits.squeeze(0)?.to_dtype(DType::F32)?;
-            let logits = if self.repeat_penalty == 1. {
-                logits
-            } else {
-                let start_at = tokens.len().saturating_sub(self.repeat_last_n);
-                candle_transformers::utils::apply_repeat_penalty(
-                    &logits,
-                    self.repeat_penalty,
-                    &tokens[start_at..],
-                )?
-            };
+            // let logits = if self.repeat_penalty == 1. {
+            //     logits
+            // } else {
+            //     let start_at = result_tokens[0].len().saturating_sub(self.repeat_last_n);
+            //     candle_transformers::utils::apply_repeat_penalty(
+            //         &logits,
+            //         self.repeat_penalty,
+            //         &result_tokens[0][start_at..],
+            //     )?
+            // };
 
             let next_token = self.logits_processor.sample(&logits)?;
-            tokens.push(next_token);
+            batch_tokens[0].push(next_token);
             generated_tokens += 1;
             if next_token == eos_token {
                 break;
             }
             if let Some(t) = self.tokenizer.next_token(next_token)? {
-                result_tokens.push(t);
+                result_tokens[0].push(t);
             }
         }
         if let Some(rest) = self.tokenizer.decode_rest().map_err(anyhow::Error::msg)? {
-            result_tokens.push(rest);
+            result_tokens[0].push(rest);
         }
         Ok(result_tokens)
     }

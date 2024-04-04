@@ -11,13 +11,14 @@ use tabular_fabric_batch_infer::models::phi::CandlePhiModelInfer;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let infer = CandlePhiModelInfer::new();
+    let mut infer = CandlePhiModelInfer::new();
 
     let batch = RecordBatch::try_from_iter(vec![(
         "col",
         Arc::new(StringArray::from(vec![
             //"Here is a sample quick sort implementation in rust".to_string(),
             //"Here is a sample quick sort implementation in rust".to_string(),
+            "<sentence>TAKE BACK RETURN</sentence>, split sentence, take first word".to_string(),
             "<sentence>TAKE BACK RETURN</sentence>, split sentence, take first word".to_string(),
         ])) as _,
     )])
@@ -39,11 +40,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     load_options.insert(
         "weight_files".to_string(),
-        format!("{}/phi-2/model.safetensors", model_repo),
+        format!(
+            "{}/phi-2/model-00001-of-00002.safetensors,{}/phi-2/model-00002-of-00002.safetensors",
+            model_repo, model_repo
+        ),
     );
 
+    load_options.insert("max_batch_size".to_string(), "2".to_string());
+
+    println!("{:#?}", load_options);
+
     infer.load(load_options);
-    infer.infer(&batch, &infer_context, HashMap::new());
+    println!("loaded model");
+
+    let mut infer_options = HashMap::new();
+    infer_options.insert("sample_len".to_string(), "2".to_string());
+    infer.infer(&batch, &infer_context, infer_options);
 
     Ok(())
 }
