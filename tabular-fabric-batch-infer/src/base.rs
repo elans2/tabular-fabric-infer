@@ -31,3 +31,5 @@ pub trait ModelInfer {
         options: HashMap<String, String>,
     ) -> Result<RecordBatch, InferError>;
 }
+
+
