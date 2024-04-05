@@ -1,3 +1,4 @@
+#![feature(ptr_from_ref)]
 
 pub mod mistral;
 pub mod phi;

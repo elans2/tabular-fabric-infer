@@ -381,17 +381,17 @@ checksum = "8c3c1a368f70d6cf7302d78f8f7093da241fb8e8807c05cc9e51a125895a6d5b"
 
 [[package]]
 name = "bindgen"
-version = "0.66.1"
+version = "0.69.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2b84e06fc203107bfbad243f4aba2af864eb7db3b1cf46ea0a023b0b433d2a7"
+checksum = "a00dc851838a2120612785d195287475a3ac45514741da670b735818822129a0"
 dependencies = [
  "bitflags 2.4.1",
  "cexpr",
  "clang-sys",
+ "itertools 0.11.0",
  "lazy_static",
  "lazycell",
  "log",
- "peeking_take_while",
  "prettyplease",
  "proc-macro2",
  "quote",
@@ -582,9 +582,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.0.83"
+version = "1.0.90"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1174fb0b6ec23863f8b971027804a42614e347eafb0a95bf0b12cdae21fc4d0"
+checksum = "8cd6604a82acf3039f1144f54b8eb34e91ffba622051189e71b781822d5ee1f5"
 dependencies = [
  "jobserver",
  "libc",
@@ -1702,12 +1702,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4cd1a83af159aa67994778be9070f0ae1bd732942279cabb14f86f986a21456"
 
 [[package]]
-name = "llama_cpp_rs"
-version = "0.3.0"
+name = "llama-cpp-2"
+version = "0.1.46"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8afbeca33ca190a69414d51ed45c7725cbd6ac1ec52a430544ac0062c28385d"
+dependencies = [
+ "llama-cpp-sys-2",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "llama-cpp-sys-2"
+version = "0.1.46"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de5c35f1c244eaf9a729810b0ceba3661d92ae3d47df4a6a777961291264ebc5"
 dependencies = [
  "bindgen",
  "cc",
- "lazy_static",
 ]
 
 [[package]]
@@ -2059,12 +2071,6 @@ dependencies = [
  "password-hash",
  "sha2",
 ]
-
-[[package]]
-name = "peeking_take_while"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19b17cddbe7ec3f8bc800887bab5e717348c95ea2ca0b1bf0837fb964dc67099"
 
 [[package]]
 name = "percent-encoding"
@@ -2694,8 +2700,9 @@ dependencies = [
  "candle-core",
  "candle-nn",
  "candle-transformers",
+ "encoding_rs",
  "itertools 0.11.0",
- "llama_cpp_rs",
+ "llama-cpp-2",
  "log",
  "serde_json",
  "structmap",

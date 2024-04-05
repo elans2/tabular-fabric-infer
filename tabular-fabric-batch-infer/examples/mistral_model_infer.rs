@@ -11,7 +11,7 @@ use tabular_fabric_batch_infer::models::mistral::CandleMistralModelInfer;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let infer = CandleMistralModelInfer::new();
+    let mut infer = CandleMistralModelInfer::new();
 
     let batch = RecordBatch::try_from_iter(vec![(
         "col",

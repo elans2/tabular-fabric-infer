@@ -11,14 +11,15 @@ use tabular_fabric_batch_infer::models::ggml::GgmlLLamaModelInfer;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let infer = GgmlLLamaModelInfer::new();
+    let mut infer = GgmlLLamaModelInfer::new();
 
     let batch = RecordBatch::try_from_iter(vec![(
         "col",
         Arc::new(StringArray::from(vec![
             //"Here is a sample quick sort implementation in rust".to_string(),
             //"Here is a sample quick sort implementation in rust".to_string(),
-            "<sentence>TAKE BACK RETURN</sentence>, split sentence, take first word".to_string(),
+            "what about phi-2 model ?".to_string(),
+            "what about phi-2 model ?".to_string(),
         ])) as _,
     )])
     .unwrap();
@@ -31,11 +32,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     load_options.insert(
         "model_file".to_string(),
-        format!("{}/model.safetensors", model_repo),
+        format!("{}/phi-2/phi-2-Q5_K_M.gguf", model_repo),
     );
 
     infer.load(load_options);
-    infer.infer(&batch, &infer_context, HashMap::new());
+    let result = infer.infer(&batch, &infer_context, HashMap::new()).unwrap();
+
+    println!("{:#?}", result);
 
     Ok(())
 }

@@ -9,8 +9,13 @@ use arrow::record_batch::RecordBatch;
 use std::backtrace::Backtrace;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::io::Write;
+use std::num::NonZeroU32;
 use std::path::PathBuf;
+use std::pin::pin;
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
+use anyhow::{bail, Context};
 
 use candle_transformers::models::mistral::{Config, Model as Mistral};
 use candle_transformers::models::quantized_mistral::Model as QMistral;
@@ -19,20 +24,27 @@ use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::generation::LogitsProcessor;
 use itertools::Itertools;
+use llama_cpp_2::context::LlamaContext;
 use tokenizers::Tokenizer;
 
 use structmap::FromMap;
 use structmap_derive::FromMap;
 
-use tracing::info;
+use tracing::{error, info};
 
-use llama_cpp_rs::{
-    options::{ModelOptions, PredictOptions},
-    LLama,
-};
 use crate::base::{InferContext, ModelInfer};
 use crate::errors::InferError;
 use crate::models::constants::RESULT_COLUMN_NAME;
+
+use llama_cpp_2::context::params::LlamaContextParams;
+use llama_cpp_2::ggml_time_us;
+use llama_cpp_2::llama_backend::LlamaBackend;
+use llama_cpp_2::llama_batch::LlamaBatch;
+use llama_cpp_2::model::params::kv_overrides::ParamOverrideValue;
+use llama_cpp_2::model::params::LlamaModelParams;
+use llama_cpp_2::model::AddBos;
+use llama_cpp_2::model::LlamaModel;
+use llama_cpp_2::token::data_array::LlamaTokenDataArray;
 
 pub fn device(cpu: bool) -> Result<Device, InferError> {
     if cpu {
@@ -73,6 +85,9 @@ struct GgmlLLamaArg {
 
     /// The context size to consider for the repeat penalty.
     repeat_last_n: u64,
+
+    threads: u64,
+    threads_batch: u64,
 }
 
 impl Default for GgmlLLamaArg {
@@ -88,18 +103,22 @@ impl Default for GgmlLLamaArg {
             quantized: true,
             repeat_penalty: 1.0,
             repeat_last_n: 64,
+            threads: 1,
+            threads_batch: 1,
         }
     }
 }
 
 pub struct GgmlLLamaModelInfer {
-    pipeline: Arc<RefCell<Option<LLama>>>,
+    backend: Arc<RefCell<Option<LlamaBackend>>>,
+    model: Arc<RefCell<Option<LlamaModel>>>,
 }
 
 impl GgmlLLamaModelInfer {
     pub fn new() -> Self {
         Self {
-            pipeline: Arc::new(RefCell::new(None)),
+            backend: Arc::new(RefCell::new(None)),
+            model: Arc::new(RefCell::new(None)),
         }
     }
 }
@@ -135,14 +154,56 @@ impl ModelInfer for GgmlLLamaModelInfer {
         );
 
         let model_file = arg.model_file.clone();
-        let mut model_options = ModelOptions::default();
-        info!("load model file: {}", model_file);
-        info!("load model options: {:#?}", model_options);
-        let llama = LLama::new(model_file.as_str().into(), &model_options).unwrap();
 
-        let mut self_pipeline = self.pipeline.clone();
-        let mut self_pipeline = self_pipeline.borrow_mut();
-        self_pipeline.get_or_insert(llama);
+        let backend = LlamaBackend::init().unwrap();
+
+        // offload all layers to the gpu
+        let model_params = {
+            #[cfg(feature = "cublas")]
+            if !disable_gpu {
+                LlamaModelParams::default().with_n_gpu_layers(1000)
+            } else {
+                LlamaModelParams::default()
+            }
+            #[cfg(not(feature = "cublas"))]
+            LlamaModelParams::default()
+        };
+
+        let mut model_params = pin!(model_params);
+
+        // for (k, v) in &key_value_overrides {
+        //     let k = CString::new(k.as_bytes()).with_context(|| format!("invalid key: {k}"))?;
+        //     model_params.as_mut().append_kv_override(k.as_c_str(), *v);
+        // }
+
+        let model_path = PathBuf::from_str(model_file.as_str()).unwrap();
+        let model = LlamaModel::load_from_file(&backend, model_path, &model_params)
+            .with_context(|| "unable to load model")?;
+
+        let mut self_backend = self.backend.clone();
+        let mut self_backend = self_backend.borrow_mut();
+        self_backend.get_or_insert(backend);
+
+        let mut self_model = self.model.clone();
+        let mut self_model = self_model.borrow_mut();
+        self_model.get_or_insert(model);
+        //
+        // // initialize the context
+        // let mut ctx_params = LlamaContextParams::default()
+        //     .with_n_ctx(Some(NonZeroU32::new(2048).unwrap()))
+        //     .with_seed(arg.seed as u32);
+        //
+        // ctx_params = ctx_params.with_n_threads(arg.threads as u32);
+        // ctx_params = ctx_params.with_n_threads_batch(arg.threads_batch as u32);
+        //
+        // let mut ctx = model2.clone()
+        //     .new_context(&backend, ctx_params)
+        //     .with_context(|| "unable to create the llama_context").unwrap();
+        //
+        // //self_backend.get_or_insert(backend);
+        // let mut self_pipeline = self.pipeline.clone();
+        // let mut self_pipeline = self_pipeline.borrow_mut();
+        // self_pipeline.get_or_insert(ctx);
 
         Ok(true)
     }
@@ -161,37 +222,96 @@ impl ModelInfer for GgmlLLamaModelInfer {
 
         let array = batch.column(0);
         let values = array.as_any().downcast_ref::<StringArray>().unwrap();
-        let mut pipeline = self.pipeline.clone();
-        let mut pipeline = pipeline.borrow_mut();
-        let mut pipeline = pipeline.as_mut().unwrap();
 
-        let mut result_values = vec![];
+        let mut backend = self.backend.clone();
+        let mut backend = backend.borrow_mut();
+        let mut backend = backend.as_mut().unwrap();
+
+        let mut model = self.model.clone();
+        let mut model = model.borrow_mut();
+        let mut model = model.as_mut().unwrap();
+
+        // // initialize the context
+        let mut ctx_params = LlamaContextParams::default().with_seed(arg.seed as u32);
+
+        let mut ctx = model
+            .new_context(&backend, ctx_params)
+            .with_context(|| "unable to create the llama_context").unwrap();
+
+        let n_len = arg.sample_len;
+
+        let mut result_values: Vec<String> = vec![];
         for value in values.iter() {
-            let value = value.unwrap();
+            ctx.clear_kv_cache();
+            let prompt = value.unwrap();
 
-            let result_tokens = Arc::new(Mutex::new(RefCell::new(vec![])));
-            let callback_result_tokens = result_tokens.clone();
-            let predict_options = PredictOptions {
-                tokens: 0,
-                threads: 4,
-                top_k: arg.sample_len as i32,
-                top_p: 0.86,
-                token_callback: Some(Box::new(move |token| {
-                    callback_result_tokens
-                        .lock()
-                        .unwrap()
-                        .borrow_mut()
-                        .push(token);
-                    true
-                })),
-                ..Default::default()
-            };
+            let mut new_tokens = vec![];
 
-            pipeline
-                .predict(value.to_string(), predict_options)
-                .unwrap();
-            let result_value = result_tokens.lock().unwrap().borrow().join("");
-            result_values.push(result_value);
+            let tokens_list = model
+                .str_to_token(prompt, AddBos::Always)
+                .with_context(|| format!("failed to tokenize {prompt}")).unwrap();
+
+            if tokens_list.len() >= usize::try_from(n_len).unwrap() {
+                error!("the prompt is too long, it has more tokens than n_len")
+            }
+
+            for token in &tokens_list {
+                info!("{}", model.token_to_str(*token).unwrap());
+            }
+
+            // create a llama_batch with size 512
+            // we use this object to submit token data for decoding
+            let mut batch = LlamaBatch::new(512, 1);
+
+            let last_index: i32 = (tokens_list.len() - 1) as i32;
+            for (i, token) in (0_i32..).zip(tokens_list.into_iter()) {
+                // llama_decode will output logits only for the last token of the prompt
+                let is_last = i == last_index;
+                batch.add(token, i, &[0], is_last).unwrap();
+            }
+
+            ctx.decode(&mut batch)
+                .with_context(|| "llama_decode() failed").unwrap();
+
+            let mut n_cur = batch.n_tokens();
+            let mut n_decode = 0;
+
+            // The `Decoder`
+            let mut decoder = encoding_rs::UTF_8.new_decoder();
+
+            while n_cur <= n_len as i32 {
+                // sample the next token
+                {
+                    let candidates = ctx.candidates_ith(batch.n_tokens() - 1);
+
+                    let candidates_p = LlamaTokenDataArray::from_iter(candidates, false);
+
+                    // sample the most likely token
+                    let new_token_id = ctx.sample_token_greedy(candidates_p);
+
+                    // is it an end of stream?
+                    if new_token_id == model.token_eos() {
+                        break;
+                    }
+
+                    let output_bytes = model.token_to_bytes(new_token_id).unwrap();
+                    // use `Decoder.decode_to_string()` to avoid the intermediate buffer
+                    let mut output_string = String::with_capacity(32);
+                    let _decode_result = decoder.decode_to_string(&output_bytes, &mut output_string, false);
+                    new_tokens.push(output_string);
+
+                    batch.clear();
+                    batch.add(new_token_id, n_cur, &[0], true).unwrap();
+                }
+
+                n_cur += 1;
+
+                ctx.decode(&mut batch).with_context(|| "failed to eval").unwrap();
+
+                n_decode += 1;
+            }
+            let new_text = new_tokens.join("");
+            result_values.push(new_text);
         }
 
         let result_batch = RecordBatch::try_from_iter(vec![(
@@ -199,7 +319,6 @@ impl ModelInfer for GgmlLLamaModelInfer {
             Arc::new(StringArray::from(result_values)) as _,
         )])
             .unwrap();
-
         Ok(result_batch)
     }
 }

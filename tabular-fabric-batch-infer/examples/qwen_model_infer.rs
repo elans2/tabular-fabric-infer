@@ -11,7 +11,7 @@ use tabular_fabric_batch_infer::models::qwen::CandleQwenModelInfer;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let infer = CandleQwenModelInfer::new();
+    let mut infer = CandleQwenModelInfer::new();
 
     let batch = RecordBatch::try_from_iter(vec![(
         "col",

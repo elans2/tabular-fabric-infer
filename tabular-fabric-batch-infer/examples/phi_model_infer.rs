@@ -5,7 +5,7 @@ use arrow::record_batch::RecordBatch;
 use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tabular_fabric_batch_infer::base::{InferContext, ModelInfer};
 use tabular_fabric_batch_infer::models::phi::CandlePhiModelInfer;
 
@@ -18,8 +18,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::new(StringArray::from(vec![
             //"Here is a sample quick sort implementation in rust".to_string(),
             //"Here is a sample quick sort implementation in rust".to_string(),
-            "<sentence>TAKE BACK RETURN</sentence>, split sentence, take first word".to_string(),
-            "<sentence>TAKE BACK RETURN</sentence>, split sentence, take first word".to_string(),
+            "what about phi-2 model ?".to_string(),
+            "what about phi-2 model ?".to_string(),
         ])) as _,
     )])
     .unwrap();
@@ -53,9 +53,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     infer.load(load_options);
     println!("loaded model");
 
+    let timer = Instant::now();
+
     let mut infer_options = HashMap::new();
     infer_options.insert("sample_len".to_string(), "2".to_string());
     infer.infer(&batch, &infer_context, infer_options);
+
+    println!("{:#?}", timer.elapsed());
 
     Ok(())
 }
