@@ -18,7 +18,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::new(StringArray::from(vec![
             //"Here is a sample quick sort implementation in rust".to_string(),
             //"Here is a sample quick sort implementation in rust".to_string(),
-            "<sentence>TAKE BACK RETURN</sentence>, split sentence, take first word".to_string(),
+            "what about qwen 1.5 model ?".to_string(),
         ])) as _,
     )])
     .unwrap();

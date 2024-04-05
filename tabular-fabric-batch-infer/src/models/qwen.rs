@@ -9,6 +9,7 @@ use arrow::record_batch::RecordBatch;
 use std::backtrace::Backtrace;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::ops::DerefMut;
 use std::sync::Arc;
 
 use candle_transformers::models::qwen2::{Config, Model};
@@ -25,6 +26,8 @@ use structmap_derive::FromMap;
 use crate::models::constants::RESULT_COLUMN_NAME;
 use crate::models::ggml::GgmlLLamaModelInfer;
 use tracing::{debug, info};
+use crate::models::candle_gen;
+use crate::models::candle_gen::{BatchGen, BatchGenModel};
 
 pub fn device(cpu: bool) -> Result<Device, InferError> {
     if cpu {
@@ -69,6 +72,8 @@ struct CandleQwenArg {
 
     /// The context size to consider for the repeat penalty.
     repeat_last_n: u64,
+
+    max_batch_size: u64,
 }
 
 impl Default for CandleQwenArg {
@@ -86,6 +91,7 @@ impl Default for CandleQwenArg {
             quantized: false,
             repeat_penalty: 1.0,
             repeat_last_n: 64,
+            max_batch_size: 1,
         }
     }
 }
@@ -94,7 +100,7 @@ impl Default for CandleQwenArg {
 
 
 pub struct CandleQwenModelInfer {
-    pipeline: Arc<RefCell<Option<CandleQwenTextGeneration>>>,
+    pipeline: Arc<RefCell<Option<CandleQwenTextGen>>>,
 }
 
 unsafe impl Sync for CandleQwenModelInfer {}
@@ -146,6 +152,7 @@ impl ModelInfer for CandleQwenModelInfer {
 
         info!("load tokenizer file {:?}", tokenizer_file);
         let tokenizer = Tokenizer::from_file(tokenizer_file).map_err(anyhow::Error::msg)?;
+        let tokenizers = (0..arg.max_batch_size).map(|_| tokenizer.clone()).collect::<Vec<_>>();
 
         let config = std::fs::read_to_string(arg.config_file).unwrap();
         let config: Config = serde_json::from_str(&config).unwrap();
@@ -163,9 +170,9 @@ impl ModelInfer for CandleQwenModelInfer {
             (ModelMode::Normal(model), device)
         };
 
-        let mut pipeline = CandleQwenTextGeneration::new(
+        let mut pipeline = CandleQwenTextGen::new(
             model,
-            tokenizer,
+            tokenizers,
             arg.seed,
             Some(arg.temperature),
             Some(arg.top_p),
@@ -198,20 +205,21 @@ impl ModelInfer for CandleQwenModelInfer {
         let mut pipeline = pipeline.borrow_mut();
         let mut pipeline = pipeline.as_mut().unwrap();
 
-        let mut result_values = vec![];
-        for value in values.iter() {
-            let value = value.unwrap();
-            let result_value = pipeline.gen(value, arg.sample_len as usize).unwrap();
-            let result_value = result_value.join(" ");
-            result_values.push(result_value);
-        }
+        let values = values.iter().collect::<Vec<_>>();
+        let (mut pos_list, mut value_list) = candle_gen::filter_not_empty_values(&values).unwrap();
 
+        println!("start infer 1");
+
+        println!("pos list {:#?}", pos_list);
+        println!("value list {:#?}", value_list);
+
+        let mut gen_value_list = candle_gen::chunk_gen(pipeline, value_list, arg.max_batch_size as usize, arg.sample_len as usize).unwrap();
+        let mut result_value_list = candle_gen::align_gen_values_with_position(pos_list, gen_value_list).unwrap();
         let result_batch = RecordBatch::try_from_iter(vec![(
             RESULT_COLUMN_NAME,
-            Arc::new(StringArray::from(result_values)) as _,
-        )])
-            .unwrap();
-
+            Arc::new(StringArray::from(result_value_list)) as _,
+        )]).map_err(|e| InferError::ArrowError { source: e })?;
+        println!("{:#?}", result_batch);
         Ok(result_batch)
     }
 }
@@ -220,20 +228,51 @@ enum ModelMode {
     Normal(Model),
 }
 
-pub struct CandleQwenTextGeneration {
-    model: ModelMode,
+pub struct CandleQwenTextGenModel {
+    model: ModelMode
+}
+
+impl crate::models::qwen::CandleQwenTextGenModel {
+    pub fn new(model: ModelMode) -> Self {
+        Self {
+            model
+        }
+    }
+}
+
+impl BatchGenModel for crate::models::qwen::CandleQwenTextGenModel {
+    fn forward(&mut self, batch_input: &Tensor) -> Result<Tensor, InferError> {
+        let seq_len = batch_input.shape().dims()[1];
+        let logits = match &mut self.model {
+            ModelMode::Normal(m) => m.forward(&batch_input, seq_len)?,
+        };
+        Ok(logits)
+    }
+
+    fn reset(&mut self) -> Result<(), InferError> {
+        match &mut self.model {
+            ModelMode::Normal(m) => m.clear_kv_cache(),
+        };
+        Ok(())
+    }
+}
+
+
+
+pub struct CandleQwenTextGen {
+    model: CandleQwenTextGenModel,
     device: Device,
-    tokenizer: TokenOutputStream,
+    tokenizers: Vec<TokenOutputStream>,
     logits_processor: LogitsProcessor,
     repeat_penalty: f32,
     repeat_last_n: usize,
 }
 
-impl CandleQwenTextGeneration {
+impl CandleQwenTextGen {
     #[allow(clippy::too_many_arguments)]
     fn new(
         model: ModelMode,
-        tokenizer: Tokenizer,
+        tokenizers: Vec<Tokenizer>,
         seed: u64,
         temp: Option<f64>,
         top_p: Option<f64>,
@@ -242,83 +281,45 @@ impl CandleQwenTextGeneration {
         device: &Device,
     ) -> Self {
         let logits_processor = LogitsProcessor::new(seed, temp, top_p);
+        let tokenizers = tokenizers.into_iter().map(|t| TokenOutputStream::new(t)).collect::<Vec<_>>();
+        let model = CandleQwenTextGenModel::new(model);
         Self {
             model,
-            tokenizer: TokenOutputStream::new(tokenizer),
+            tokenizers,
             logits_processor,
             repeat_penalty,
             repeat_last_n,
             device: device.clone(),
         }
     }
+}
 
-    fn gen(&mut self, prompt: &str, sample_len: usize) -> Result<Vec<String>, InferError> {
-        match &mut self.model {
-            ModelMode::Normal(m) => m.clear_kv_cache(),
-        };
-        self.tokenizer.clear();
-        let mut tokens = self
-            .tokenizer
-            .tokenizer()
-            .encode(prompt, true)
-            .map_err(anyhow::Error::msg)?
-            .get_ids()
-            .to_vec();
-        for &t in tokens.iter() {
-            if let Some(t) = self.tokenizer.next_token(t)? {
-                debug!("{t}")
-            }
+impl BatchGen for CandleQwenTextGen {
+
+    fn gen(&mut self, prompts: &Vec<String>, sample_len: usize) -> Result<Vec<Vec<String>>, InferError> {
+        println!("prompts: {:#?}", prompts);
+        for tokenizer in &mut self.tokenizers {
+            tokenizer.clear();
         }
-        let mut generated_tokens = 0usize;
-        let eos_token = match self.tokenizer.get_token("<|endoftext|>") {
+        let eos_token = match self.tokenizers[0].get_token("<|endoftext|>") {
             Some(token) => token,
             None => {
                 return Err(InferError::GenericError {
-                    msg: "cannot find the <|endoftext|> token".to_string(),
+                    msg: "cannot find the </s> token".to_string(),
                 })
-            },
+            }
         };
-        let mut result_tokens = vec![];
-        for index in 0..sample_len {
-            let context_size = if index > 0 { 1 } else { tokens.len() };
-            let start_pos = tokens.len().saturating_sub(context_size);
-            let ctxt = &tokens[start_pos..];
-            let input = Tensor::new(ctxt, &self.device)?;
-            let input = input.unsqueeze(0)?;
-            let input2 = input.clone();
-            let input3 = Tensor::cat(&[input.clone(), input2], 0)?;
-            let input = input3.clone();
-            let logits = match &mut self.model {
-                ModelMode::Normal(m) => m.forward(&input, start_pos)?,
-            };
-
-            let logits = logits.get(0)?;
-
-            let logits = logits.squeeze(0)?.to_dtype(DType::F32)?;
-            let logits = if self.repeat_penalty == 1. {
-                logits
-            } else {
-                let start_at = tokens.len().saturating_sub(self.repeat_last_n);
-                candle_transformers::utils::apply_repeat_penalty(
-                    &logits,
-                    self.repeat_penalty,
-                    &tokens[start_at..],
-                )?
-            };
-
-            let next_token = self.logits_processor.sample(&logits)?;
-            tokens.push(next_token);
-            generated_tokens += 1;
-            if next_token == eos_token {
-                break;
+        let pad_token = match self.tokenizers[0].get_token("<|endoftext|>") {
+            Some(token) => token,
+            None => {
+                return Err(InferError::GenericError {
+                    msg: "cannot find the <unk> token".to_string(),
+                })
             }
-            if let Some(t) = self.tokenizer.next_token(next_token)? {
-                result_tokens.push(t);
-            }
-        }
-        if let Some(rest) = self.tokenizer.decode_rest().map_err(anyhow::Error::msg)? {
-            result_tokens.push(rest);
-        }
-        Ok(result_tokens)
+        };
+
+        self.model.reset()?;
+        let result_batch_tokens = candle_gen::batch_infer(&mut self.model, &mut self.tokenizers, &mut self.logits_processor, prompts.clone(), sample_len, &self.device, eos_token, pad_token).unwrap();
+        Ok(result_batch_tokens)
     }
 }

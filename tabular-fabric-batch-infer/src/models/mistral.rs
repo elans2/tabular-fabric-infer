@@ -27,6 +27,10 @@ use tracing::{debug, info};
 use crate::models::constants::RESULT_COLUMN_NAME;
 use crate::models::ggml::GgmlLLamaModelInfer;
 use itertools::Itertools;
+use crate::models::candle_gen;
+use crate::models::candle_gen::{BatchGen, BatchGenModel};
+use crate::models::phi::CandlePhiTextGenModel;
+use crate::models::qwen::CandleQwenTextGenModel;
 
 pub fn device(cpu: bool) -> Result<Device, InferError> {
     if cpu {
@@ -69,6 +73,8 @@ struct CandleMistralArg {
 
     /// The context size to consider for the repeat penalty.
     repeat_last_n: u64,
+
+    max_batch_size: u64,
 }
 
 impl Default for CandleMistralArg {
@@ -85,12 +91,13 @@ impl Default for CandleMistralArg {
             quantized: false,
             repeat_penalty: 1.0,
             repeat_last_n: 64,
+            max_batch_size: 1,
         }
     }
 }
 
 pub struct CandleMistralModelInfer {
-    pipeline: Arc<RefCell<Option<CandleMistralTextGeneration>>>,
+    pipeline: Arc<RefCell<Option<CandleMistralTextGen>>>,
 }
 
 unsafe impl Sync for CandleMistralModelInfer {}
@@ -144,6 +151,7 @@ impl ModelInfer for CandleMistralModelInfer {
         let weight_files = arg.weight_files.split(",").map(|x| std::path::PathBuf::from(x)).collect::<Vec<std::path::PathBuf>>();
 
         let tokenizer = Tokenizer::from_file(tokenizer_file).map_err(anyhow::Error::msg)?;
+        let tokenizers = (0..arg.max_batch_size).map(|_| tokenizer.clone()).collect::<Vec<_>>();
 
         let config = Config::config_7b_v0_1(arg.use_flash_attn);
         let (model, device) = if arg.quantized {
@@ -164,9 +172,9 @@ impl ModelInfer for CandleMistralModelInfer {
             (ModelMode::Normal(model), device)
         };
 
-        let mut pipeline = CandleMistralTextGeneration::new(
+        let mut pipeline = CandleMistralTextGen::new(
             model,
-            tokenizer,
+            tokenizers,
             arg.seed,
             Some(arg.temperature),
             Some(arg.top_p),
@@ -239,20 +247,20 @@ enum ModelMode {
     Quantized(QModel),
 }
 
-pub struct CandleMistralTextGeneration {
-    model: ModelMode,
+pub struct CandleMistralTextGen {
+    model: CandleMistralTextGenModel,
     device: Device,
-    tokenizer: TokenOutputStream,
+    tokenizers: Vec<TokenOutputStream>,
     logits_processor: LogitsProcessor,
     repeat_penalty: f32,
     repeat_last_n: usize,
 }
 
-impl CandleMistralTextGeneration {
+impl CandleMistralTextGen {
     #[allow(clippy::too_many_arguments)]
     fn new(
         model: ModelMode,
-        tokenizer: Tokenizer,
+        tokenizers: Vec<Tokenizer>,
         seed: u64,
         temp: Option<f64>,
         top_p: Option<f64>,
@@ -261,35 +269,57 @@ impl CandleMistralTextGeneration {
         device: &Device,
     ) -> Self {
         let logits_processor = LogitsProcessor::new(seed, temp, top_p);
+        let tokenizers = tokenizers.into_iter().map(|t| TokenOutputStream::new(t)).collect::<Vec<_>>();
+        let model = CandleMistralTextGenModel::new(model);
         Self {
             model,
-            tokenizer: TokenOutputStream::new(tokenizer),
+            tokenizers,
             logits_processor,
             repeat_penalty,
             repeat_last_n,
             device: device.clone(),
         }
     }
+}
 
-    fn gen(&mut self, prompts: &Vec<String>, sample_len: usize) -> Result<Vec<Vec<String>>, InferError> {
+pub struct CandleMistralTextGenModel {
+    model: ModelMode
+}
+
+impl crate::models::mistral::CandleMistralTextGenModel {
+    pub fn new(model: ModelMode) -> Self {
+        Self {
+            model
+        }
+    }
+}
+
+impl BatchGenModel for crate::models::mistral::CandleMistralTextGenModel {
+    fn forward(&mut self, batch_input: &Tensor) -> Result<Tensor, InferError> {
+        let seq_len = batch_input.shape().dims()[1];
+        let logits = match &mut self.model {
+            ModelMode::Normal(m) => m.forward(&batch_input, seq_len)?,
+            ModelMode::Quantized(m) => m.forward(&batch_input, seq_len)?,
+        };
+        Ok(logits)
+    }
+
+    fn reset(&mut self) -> Result<(), InferError> {
         match &mut self.model {
             ModelMode::Normal(m) => m.clear_kv_cache(),
             ModelMode::Quantized(m) => m.clear_kv_cache(),
         };
-        self.tokenizer.clear();
-        let mut batch_tokens = vec![];
-        for prompt in prompts {
-            let tokens = self
-                .tokenizer
-                .tokenizer()
-                .encode(prompt.to_owned(), true)
-                .map_err(anyhow::Error::msg)?
-                .get_ids()
-                .to_vec();
-            batch_tokens.push(tokens);
+        Ok(())
+    }
+}
+
+impl BatchGen for CandleMistralTextGen {
+    fn gen(&mut self, prompts: &Vec<String>, sample_len: usize) -> Result<Vec<Vec<String>>, InferError> {
+        println!("prompts: {:#?}", prompts);
+        for tokenizer in &mut self.tokenizers {
+            tokenizer.clear();
         }
-        let mut generated_tokens = 0usize;
-        let eos_token = match self.tokenizer.get_token("</s>") {
+        let eos_token = match self.tokenizers[0].get_token("<|endoftext|>") {
             Some(token) => token,
             None => {
                 return Err(InferError::GenericError {
@@ -297,7 +327,7 @@ impl CandleMistralTextGeneration {
                 })
             }
         };
-        let pad_token = match self.tokenizer.get_token("<unk>") {
+        let pad_token = match self.tokenizers[0].get_token("<|endoftext|>") {
             Some(token) => token,
             None => {
                 return Err(InferError::GenericError {
@@ -305,58 +335,9 @@ impl CandleMistralTextGeneration {
                 })
             }
         };
-        let mut max_len = batch_tokens.clone().into_iter().map(|ts| ts.len()).max();
-        if let Some(max_len) = max_len {
-            for tokens in &mut batch_tokens {
-                for _ in 0..(max_len - tokens.len()) {
-                    tokens.push(pad_token);
-                }
-            }
-        }
-        let mut result_tokens: Vec<Vec<String>> = vec![];
-        for index in 0..sample_len {
-            let context_size = if index > 0 { 1 } else { result_tokens[0].len() };
-            let start_pos = result_tokens[0].len().saturating_sub(context_size);
-            let mut row_inputs = vec![];
-            for batch_idx in 0..batch_tokens.len() {
-                let ctxt = &batch_tokens[batch_idx][start_pos..];
-                let row_input = Tensor::new(ctxt, &self.device)?;
-                let row_input = row_input.unsqueeze(0)?;
-                row_inputs.push(row_input);
-            }
-            let batch_input = Tensor::cat(&row_inputs, 0)?;
-            let logits = match &mut self.model {
-                ModelMode::Normal(m) => m.forward(&batch_input, start_pos)?,
-                ModelMode::Quantized(m) => m.forward(&batch_input, start_pos)?,
-            };
 
-            let logits = logits.get(0)?;
-
-            let logits = logits.squeeze(0)?.to_dtype(DType::F32)?;
-            // let logits = if self.repeat_penalty == 1. {
-            //     logits
-            // } else {
-            //     let start_at = result_tokens[0].len().saturating_sub(self.repeat_last_n);
-            //     candle_transformers::utils::apply_repeat_penalty(
-            //         &logits,
-            //         self.repeat_penalty,
-            //         &result_tokens[0][start_at..],
-            //     )?
-            // };
-
-            let next_token = self.logits_processor.sample(&logits)?;
-            batch_tokens[0].push(next_token);
-            generated_tokens += 1;
-            if next_token == eos_token {
-                break;
-            }
-            if let Some(t) = self.tokenizer.next_token(next_token)? {
-                result_tokens[0].push(t);
-            }
-        }
-        if let Some(rest) = self.tokenizer.decode_rest().map_err(anyhow::Error::msg)? {
-            result_tokens[0].push(rest);
-        }
-        Ok(result_tokens)
+        self.model.reset()?;
+        let result_batch_tokens = candle_gen::batch_infer(&mut self.model, &mut self.tokenizers, &mut self.logits_processor, prompts.clone(), sample_len, &self.device, eos_token, pad_token).unwrap();
+        Ok(result_batch_tokens)
     }
 }

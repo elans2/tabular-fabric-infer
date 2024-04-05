@@ -100,7 +100,7 @@ impl Default for CandlePhiArg {
 }
 
 pub struct CandlePhiModelInfer {
-    pipeline: Arc<RefCell<Option<CandlePhiTextGeneration>>>,
+    pipeline: Arc<RefCell<Option<CandlePhiTextGen>>>,
     arg: Option<CandlePhiArg>,
 }
 
@@ -177,7 +177,7 @@ impl ModelInfer for CandlePhiModelInfer {
             (ModelMode::Normal(model), device)
         };
 
-        let mut pipeline = CandlePhiTextGeneration::new(
+        let mut pipeline = CandlePhiTextGen::new(
             model,
             tokenizers,
             arg.seed,
@@ -236,16 +236,16 @@ enum ModelMode {
     Normal(Model),
 }
 
-pub struct CandlePhiTextGeneration {
-    model: CandlePhiTextGenerationModel,
+pub struct CandlePhiTextGen {
+    model: CandlePhiTextGenModel,
     device: Device,
     tokenizers: Vec<TokenOutputStream>,
-    logits_processor: Arc<RefCell<LogitsProcessor>>,
+    logits_processor: LogitsProcessor,
     repeat_penalty: f32,
     repeat_last_n: usize,
 }
 
-impl CandlePhiTextGeneration {
+impl CandlePhiTextGen {
     #[allow(clippy::too_many_arguments)]
     fn new(
         model: ModelMode,
@@ -257,9 +257,9 @@ impl CandlePhiTextGeneration {
         repeat_last_n: usize,
         device: &Device,
     ) -> Self {
-        let logits_processor = Arc::new(RefCell::new(LogitsProcessor::new(seed, temp, top_p)));
+        let logits_processor = LogitsProcessor::new(seed, temp, top_p);
         let tokenizers = tokenizers.into_iter().map(|t| TokenOutputStream::new(t)).collect::<Vec<_>>();
-        let model = CandlePhiTextGenerationModel::new(model);
+        let model = CandlePhiTextGenModel::new(model);
         Self {
             model,
             tokenizers,
@@ -271,11 +271,11 @@ impl CandlePhiTextGeneration {
     }
 }
 
-pub struct CandlePhiTextGenerationModel {
+pub struct CandlePhiTextGenModel {
     model: ModelMode
 }
 
-impl CandlePhiTextGenerationModel {
+impl CandlePhiTextGenModel {
     pub fn new(model: ModelMode) -> Self {
         Self {
             model
@@ -283,8 +283,9 @@ impl CandlePhiTextGenerationModel {
     }
 }
 
-impl BatchGenModel for CandlePhiTextGenerationModel {
+impl BatchGenModel for CandlePhiTextGenModel {
     fn forward(&mut self, batch_input: &Tensor) -> Result<Tensor, InferError> {
+        println!("{:#?}, {:#?}", batch_input.shape(), batch_input.shape().dims()[1]);
         let logits = match &mut self.model {
             ModelMode::Normal(m) => m.forward(&batch_input)?,
         };
@@ -299,7 +300,7 @@ impl BatchGenModel for CandlePhiTextGenerationModel {
     }
 }
 
-impl BatchGen for CandlePhiTextGeneration {
+impl BatchGen for CandlePhiTextGen {
 
     fn gen(&mut self, prompts: &Vec<String>, sample_len: usize) -> Result<Vec<Vec<String>>, InferError> {
         println!("prompts: {:#?}", prompts);
@@ -324,7 +325,7 @@ impl BatchGen for CandlePhiTextGeneration {
         };
 
         self.model.reset()?;
-        let result_batch_tokens = candle_gen::batch_infer(&mut self.model, &mut self.tokenizers, self.logits_processor.borrow_mut().deref_mut(), prompts.clone(), sample_len, &self.device, eos_token, pad_token).unwrap();
+        let result_batch_tokens = candle_gen::batch_infer(&mut self.model, &mut self.tokenizers, &mut self.logits_processor, prompts.clone(), sample_len, &self.device, eos_token, pad_token).unwrap();
         Ok(result_batch_tokens)
     }
 }
