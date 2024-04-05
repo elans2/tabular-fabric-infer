@@ -85,9 +85,6 @@ struct GgmlLLamaArg {
 
     /// The context size to consider for the repeat penalty.
     repeat_last_n: u64,
-
-    threads: u64,
-    threads_batch: u64,
 }
 
 impl Default for GgmlLLamaArg {
@@ -103,8 +100,6 @@ impl Default for GgmlLLamaArg {
             quantized: true,
             repeat_penalty: 1.0,
             repeat_last_n: 64,
-            threads: 1,
-            threads_batch: 1,
         }
     }
 }
@@ -159,13 +154,13 @@ impl ModelInfer for GgmlLLamaModelInfer {
 
         // offload all layers to the gpu
         let model_params = {
-            #[cfg(feature = "cublas")]
-            if !disable_gpu {
+            #[cfg(feature = "cuda")]
+            if !arg.cpu {
                 LlamaModelParams::default().with_n_gpu_layers(1000)
             } else {
                 LlamaModelParams::default()
             }
-            #[cfg(not(feature = "cublas"))]
+            #[cfg(not(feature = "cuda"))]
             LlamaModelParams::default()
         };
 
