@@ -241,10 +241,9 @@ impl crate::models::qwen::CandleQwenTextGenModel {
 }
 
 impl BatchGenModel for crate::models::qwen::CandleQwenTextGenModel {
-    fn forward(&mut self, batch_input: &Tensor) -> Result<Tensor, InferError> {
-        let seq_len = batch_input.shape().dims()[1];
+    fn forward(&mut self, batch_input: &Tensor, seqlen_offset: usize) -> Result<Tensor, InferError> {
         let logits = match &mut self.model {
-            ModelMode::Normal(m) => m.forward(&batch_input, seq_len)?,
+            ModelMode::Normal(m) => m.forward(&batch_input, seqlen_offset)?,
         };
         Ok(logits)
     }

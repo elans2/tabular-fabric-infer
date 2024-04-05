@@ -5,7 +5,7 @@ use crate::errors::InferError;
 use crate::models::utils::token_output_stream::TokenOutputStream;
 
 pub trait BatchGenModel {
-    fn forward(&mut self, batch_input: &Tensor) -> Result<Tensor, InferError>;
+    fn forward(&mut self, batch_input: &Tensor, seqlen_offset: usize) -> Result<Tensor, InferError>;
     fn reset(&mut self) -> Result<(), InferError>;
 }
 
@@ -90,7 +90,7 @@ pub fn batch_infer(batch_gen_model: &mut impl BatchGenModel, tokenizers: &mut Ve
         }
         let batch_input = Tensor::cat(&row_inputs, 0)?;
         println!("batch_input 1: {:#?}", batch_input.shape());
-        let logits = batch_gen_model.forward(&batch_input)?;
+        let logits = batch_gen_model.forward(&batch_input, start_pos)?;
 
         for batch_idx in 0..batch_tokens.len() {
             let logits = logits.get(batch_idx)?;

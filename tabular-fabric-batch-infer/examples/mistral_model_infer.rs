@@ -5,7 +5,7 @@ use arrow::record_batch::RecordBatch;
 use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tabular_fabric_batch_infer::base::{InferContext, ModelInfer};
 use tabular_fabric_batch_infer::models::mistral::CandleMistralModelInfer;
 
@@ -41,8 +41,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ),
     );
 
+    load_options.insert("max_batch_size".to_string(), "2".to_string());
+
+    println!("{:#?}", load_options);
+
     infer.load(load_options);
-    infer.infer(&batch, &infer_context, HashMap::new());
+    println!("loaded model");
+
+    let timer = Instant::now();
+
+    let mut infer_options = HashMap::new();
+    infer_options.insert("sample_len".to_string(), "2".to_string());
+    infer.infer(&batch, &infer_context, infer_options);
+
+    println!("{:#?}", timer.elapsed());
 
     Ok(())
 }

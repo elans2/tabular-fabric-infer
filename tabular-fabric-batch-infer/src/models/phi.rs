@@ -284,7 +284,7 @@ impl CandlePhiTextGenModel {
 }
 
 impl BatchGenModel for CandlePhiTextGenModel {
-    fn forward(&mut self, batch_input: &Tensor) -> Result<Tensor, InferError> {
+    fn forward(&mut self, batch_input: &Tensor, seqlen_offset: usize) -> Result<Tensor, InferError> {
         println!("{:#?}, {:#?}", batch_input.shape(), batch_input.shape().dims()[1]);
         let logits = match &mut self.model {
             ModelMode::Normal(m) => m.forward(&batch_input)?,

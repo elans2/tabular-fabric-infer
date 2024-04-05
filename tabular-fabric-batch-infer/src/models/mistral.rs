@@ -221,7 +221,7 @@ impl ModelInfer for CandleMistralModelInfer {
         }
 
         let mut gen_value_list = vec![];
-        for chunk_values in &value_list.into_iter().chunks(100) {
+        for chunk_values in &value_list.into_iter().chunks(arg.max_batch_size as usize) {
             let chunk_values= chunk_values.collect_vec();
             let mut chunk_result_values = pipeline.gen(&chunk_values, arg.sample_len as usize).unwrap();
             gen_value_list.append(&mut chunk_result_values);
@@ -295,11 +295,10 @@ impl crate::models::mistral::CandleMistralTextGenModel {
 }
 
 impl BatchGenModel for crate::models::mistral::CandleMistralTextGenModel {
-    fn forward(&mut self, batch_input: &Tensor) -> Result<Tensor, InferError> {
-        let seq_len = batch_input.shape().dims()[1];
+    fn forward(&mut self, batch_input: &Tensor, seqlen_offset: usize) -> Result<Tensor, InferError> {
         let logits = match &mut self.model {
-            ModelMode::Normal(m) => m.forward(&batch_input, seq_len)?,
-            ModelMode::Quantized(m) => m.forward(&batch_input, seq_len)?,
+            ModelMode::Normal(m) => m.forward(&batch_input, seqlen_offset)?,
+            ModelMode::Quantized(m) => m.forward(&batch_input, seqlen_offset)?,
         };
         Ok(logits)
     }
@@ -319,7 +318,7 @@ impl BatchGen for CandleMistralTextGen {
         for tokenizer in &mut self.tokenizers {
             tokenizer.clear();
         }
-        let eos_token = match self.tokenizers[0].get_token("<|endoftext|>") {
+        let eos_token = match self.tokenizers[0].get_token("</s>") {
             Some(token) => token,
             None => {
                 return Err(InferError::GenericError {
@@ -327,7 +326,7 @@ impl BatchGen for CandleMistralTextGen {
                 })
             }
         };
-        let pad_token = match self.tokenizers[0].get_token("<|endoftext|>") {
+        let pad_token = match self.tokenizers[0].get_token("</s>") {
             Some(token) => token,
             None => {
                 return Err(InferError::GenericError {
