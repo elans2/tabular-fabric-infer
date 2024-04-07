@@ -233,8 +233,6 @@ impl ModelInfer for GgmlLLamaModelInfer {
             .new_context(&backend, ctx_params)
             .with_context(|| "unable to create the llama_context").unwrap();
 
-        let n_len = arg.sample_len;
-
         let mut result_values: Vec<String> = vec![];
         for value in values.iter() {
             ctx.clear_kv_cache();
@@ -246,6 +244,7 @@ impl ModelInfer for GgmlLLamaModelInfer {
                 .str_to_token(prompt, AddBos::Always)
                 .with_context(|| format!("failed to tokenize {prompt}")).unwrap();
 
+            let n_len = tokens_list.len() + arg.sample_len as usize;
             if tokens_list.len() >= usize::try_from(n_len).unwrap() {
                 error!("the prompt is too long, it has more tokens than n_len")
             }
@@ -273,6 +272,7 @@ impl ModelInfer for GgmlLLamaModelInfer {
 
             // The `Decoder`
             let mut decoder = encoding_rs::UTF_8.new_decoder();
+
 
             while n_cur <= n_len as i32 {
                 // sample the next token
@@ -308,6 +308,8 @@ impl ModelInfer for GgmlLLamaModelInfer {
             let new_text = new_tokens.join("");
             result_values.push(new_text);
         }
+
+        println!("result_values: {:#?}", result_values);
 
         let result_batch = RecordBatch::try_from_iter(vec![(
             RESULT_COLUMN_NAME,

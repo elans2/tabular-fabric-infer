@@ -76,6 +76,7 @@ pub fn batch_infer(batch_gen_model: &mut impl BatchGenModel, tokenizers: &mut Ve
     }
     let mut generated_tokens = 0usize;
     let mut result_batch_tokens: Vec<Vec<String>> = vec![];
+    println!("sample_len, {}", sample_len);
     for index in 0..sample_len {
         let context_size = if index > 0 { 1 } else { batch_tokens[0].len() };
         let start_pos = batch_tokens[0].len().saturating_sub(context_size);

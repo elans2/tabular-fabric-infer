@@ -16,7 +16,7 @@ use std::sync::Arc;
 use candle_transformers::models::phi::{Config, Model};
 
 use crate::errors::InferError;
-use candle_core::{DType, Device, Tensor};
+use candle_core::{DType, Device, Tensor, MetalDevice};
 use candle_nn::VarBuilder;
 use candle_transformers::generation::LogitsProcessor;
 use itertools::Itertools;
@@ -201,11 +201,13 @@ impl ModelInfer for CandlePhiModelInfer {
         options: HashMap<String, String>,
     ) -> Result<RecordBatch, InferError> {
         println!("start infer 0");
+        println!("infer options: {:#?}", options);
         let mut arg = StringMap::new();
         for kv in options.into_iter() {
             arg.insert(kv.0, kv.1);
         }
         let arg = CandlePhiArg::from_stringmap(arg);
+        println!("arg sample len {}", arg.sample_len);
 
         let array = batch.column(0);
         let values = array.as_any().downcast_ref::<StringArray>().unwrap();
