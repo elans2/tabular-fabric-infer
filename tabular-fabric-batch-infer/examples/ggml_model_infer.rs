@@ -19,7 +19,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             //"Here is a sample quick sort implementation in rust".to_string(),
             //"Here is a sample quick sort implementation in rust".to_string(),
             "what about phi-2 model ?".to_string(),
-            "what about phi-2 model ?".to_string(),
         ])) as _,
     )])
     .unwrap();
@@ -36,9 +35,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     infer.load(load_options);
-    let result = infer.infer(&batch, &infer_context, HashMap::new()).unwrap();
-
-    println!("{:#?}", result);
+    
+    let mut infer_options = HashMap::new();
+    infer_options.insert("sample_len".to_string(), "50".to_string());
+    
+    for i in 0..10 {
+        let result = infer.infer(&batch, &infer_context, infer_options.clone()).unwrap();
+    }
+    //println!("{:#?}", result);
 
     Ok(())
 }
