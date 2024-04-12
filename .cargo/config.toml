@@ -2,27 +2,14 @@
 git-fetch-with-cli = true
 retry = 10
 
-#[source.crates-io]
-#registry = "https://github.com/rust-lang/crates.io-index"
-#replace-with = 'basebit'
-
-#[source.basebit]
-#registry = "https://oauth2:vB1XhpXwgWuw-hyM9FNK@git.basebit.me/daas/crates.io-index.git"
-#registry = "ssh://gitlab/daas/crates.io-index.git"
-
 [http]
 timeout = 10
 check-revoke = false
 multiplexing = true
 
-[net.ssh]
-known-hosts = ["git.basebit.me,10.0.0.241 ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBMIqUIievJ59zC38qtla06urrrvZoh+Jv0AnDh9RBQY5T/4YbWj8VDO8oxVyByA0pq92uphSwG4WDDAgME2Fao8="]
-
 #[build]
 #rustflags = ["-C", "target-cpu=native"]
 
-# use mold linker to reduce compilation time, see https://github.com/rui314/mold
-# mold is installed within builder image docker-reg.basebit.me:5000/daas/tabular/rust1.72-protoc:v1.3
 [target.x86_64-unknown-linux-gnu]
 rustflags = ["-C", "target-feature=+avx2,+aes,+fma"]
 

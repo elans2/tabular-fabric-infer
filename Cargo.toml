@@ -1,9 +1,9 @@
 
 
 [workspace]
-members = [ 
-    "tabular-fabric-cascade-infer",
+members = [
     "tabular-candle-cascade-attn",
+    "tabular-fabric-batch-infer",
 ]
 exclude = [
 ]
@@ -92,10 +92,12 @@ quote = "1.0.15"
 syn = { version = "1.0.86", features = ["full"] }
 hyper = "0.14.10"
 
+structmap = { version = "0.1.6" }
+structmap-derive = { version = "0.1.6" }
 
 criterion = "0.4"
 test-log = "0.2.10"
 pprof = { version = "0.11.0", features = ["flamegraph", "criterion"] }
 
-
-
+[feature]
+cuda = ["tabular-fabric-batch-infer/cuda"]
