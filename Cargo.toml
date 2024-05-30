@@ -8,18 +8,18 @@ exclude = [
 ]
 
 [workspace.dependencies]
-parquet = "40.0.0"
-arrow = { version = "40.0.0", features = ["ffi"] }
-arrow-schema = "40.0.0"
-arrow-cast = "40.0.0"
-arrow-csv = "40.0.0"
-arrow-flight = "40.0.0"
-datafusion = "26.0.0"
-datafusion-common = "26.0.0"
-datafusion-expr = "26.0.0"
-datafusion-sql = "26.0.0"
-datafusion-optimizer = "26.0.0"
-datafusion-substrait = "26.0.0"
+parquet = "51.0.0"
+arrow = { version = "51.0.0", features = ["ffi"] }
+arrow-schema = "51.0.0"
+arrow-cast = "51.0.0"
+arrow-csv = "51.0.0"
+arrow-flight = "51.0.0"
+datafusion = "38.0.0"
+datafusion-common = "38.0.0"
+datafusion-expr = "38.0.0"
+datafusion-sql = "38.0.0"
+datafusion-optimizer = "38.0.0"
+datafusion-substrait = "38.0.0"
 
 arrow2 = "0.17.0"
 prost = "0.11.8"
