@@ -8,8 +8,8 @@ exclude = [
 ]
 
 [workspace.dependencies]
-parquet = { git = "ssh://git@git.basebit.me/daas/arrow-rs.git", tag = "51.0.0"}
-arrow = { git = "ssh://git@git.basebit.me/daas/arrow-rs.git", tag = "51.0.0", features = ["ffi"] }
+parquet = { version = "51.0.0"}
+arrow = { version = "51.0.0", features = ["ffi"] }
 
 tokio = { version = "1.28.0", features = ["macros", "rt-multi-thread"] }
 tracing = "0.1"
