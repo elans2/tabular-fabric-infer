@@ -42,7 +42,7 @@ use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::kv_overrides::ParamOverrideValue;
 use llama_cpp_2::model::params::LlamaModelParams;
-use llama_cpp_2::model::AddBos;
+use llama_cpp_2::model::{AddBos, Special};
 use llama_cpp_2::model::LlamaModel;
 use llama_cpp_2::token::data_array::LlamaTokenDataArray;
 
@@ -250,7 +250,7 @@ impl ModelInfer for GgmlLLamaModelInfer {
             }
 
             for token in &tokens_list {
-                info!("{}", model.token_to_str(*token).unwrap());
+                info!("{}", model.token_to_str(*token, Special::Plaintext).unwrap());
             }
 
             // create a llama_batch with size 512
@@ -289,7 +289,7 @@ impl ModelInfer for GgmlLLamaModelInfer {
                         break;
                     }
 
-                    let output_bytes = model.token_to_bytes(new_token_id).unwrap();
+                    let output_bytes = model.token_to_bytes(new_token_id, Special::Plaintext).unwrap();
                     // use `Decoder.decode_to_string()` to avoid the intermediate buffer
                     let mut output_string = String::with_capacity(32);
                     let _decode_result = decoder.decode_to_string(&output_bytes, &mut output_string, false);
