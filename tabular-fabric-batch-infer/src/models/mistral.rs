@@ -4,8 +4,6 @@ extern crate intel_mkl_src;
 #[cfg(feature = "accelerate")]
 extern crate accelerate_src;
 
-use arrow::array::{Array, StringArray, UInt64Array};
-use arrow::record_batch::RecordBatch;
 use std::backtrace::Backtrace;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -14,23 +12,22 @@ use std::sync::Arc;
 use candle_transformers::models::mistral::{Config, Model};
 use candle_transformers::models::quantized_mistral::Model as QModel;
 
+use crate::base::{InferBatch, InferContext, ModelInfer};
 use crate::errors::InferError;
+use crate::models::candle_gen;
+use crate::models::candle_gen::{BatchGen, BatchGenModel};
+use crate::models::constants::RESULT_COLUMN_NAME;
+use crate::models::phi::CandlePhiTextGenModel;
+use crate::models::qwen::CandleQwenTextGenModel;
+use crate::models::utils::token_output_stream::TokenOutputStream;
 use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::generation::LogitsProcessor;
-use tokenizers::Tokenizer;
-use crate::base::{ModelInfer, InferContext};
-use crate::models::utils::token_output_stream::TokenOutputStream;
+use itertools::Itertools;
 use structmap::FromMap;
 use structmap_derive::FromMap;
+use tokenizers::Tokenizer;
 use tracing::{debug, info};
-use crate::models::constants::RESULT_COLUMN_NAME;
-use crate::models::ggml::GgmlLLamaModelInfer;
-use itertools::Itertools;
-use crate::models::candle_gen;
-use crate::models::candle_gen::{BatchGen, BatchGenModel};
-use crate::models::phi::CandlePhiTextGenModel;
-use crate::models::qwen::CandleQwenTextGenModel;
 
 pub fn device(cpu: bool) -> Result<Device, InferError> {
     if cpu {
@@ -112,18 +109,11 @@ impl CandleMistralModelInfer {
 }
 
 impl ModelInfer for CandleMistralModelInfer {
-
     fn file_resources(&self) -> Vec<String> {
-        vec![
-            "tokenizer_file".to_string(),
-            "weight_files".to_string(),
-        ]
+        vec!["tokenizer_file".to_string(), "weight_files".to_string()]
     }
 
-    fn load(
-        &mut self,
-        options: HashMap<String, String>,
-    ) -> Result<bool, InferError> {
+    fn load(&mut self, options: HashMap<String, String>) -> Result<bool, InferError> {
         let mut arg = StringMap::new();
         for kv in options.into_iter() {
             arg.insert(kv.0, kv.1);
@@ -139,25 +129,29 @@ impl ModelInfer for CandleMistralModelInfer {
         );
         info!(
             "temp: {:.2} repeat-penalty: {:.2} repeat-last-n: {}",
-            arg.temperature,
-            arg.repeat_penalty,
-            arg.repeat_last_n
+            arg.temperature, arg.repeat_penalty, arg.repeat_last_n
         );
 
-        let tokenizer_file = std::path::PathBuf::from(
-            arg.tokenizer_file,
-        );
+        let tokenizer_file = std::path::PathBuf::from(arg.tokenizer_file);
 
-        let weight_files = arg.weight_files.split(",").map(|x| std::path::PathBuf::from(x)).collect::<Vec<std::path::PathBuf>>();
+        let weight_files = arg
+            .weight_files
+            .split(",")
+            .map(|x| std::path::PathBuf::from(x))
+            .collect::<Vec<std::path::PathBuf>>();
 
         let tokenizer = Tokenizer::from_file(tokenizer_file).map_err(anyhow::Error::msg)?;
-        let tokenizers = (0..arg.max_batch_size).map(|_| tokenizer.clone()).collect::<Vec<_>>();
+        let tokenizers = (0..arg.max_batch_size)
+            .map(|_| tokenizer.clone())
+            .collect::<Vec<_>>();
 
         let config = Config::config_7b_v0_1(arg.use_flash_attn);
         let (model, device) = if arg.quantized {
             let filename = &weight_files[0];
             let device = Device::new_metal(0)?;
-            let vb = candle_transformers::quantized_var_builder::VarBuilder::from_gguf(filename, &device)?;
+            let vb = candle_transformers::quantized_var_builder::VarBuilder::from_gguf(
+                filename, &device,
+            )?;
             let model = QModel::new(&config, vb)?;
             (ModelMode::Quantized(model), Device::Cpu)
         } else {
@@ -191,18 +185,18 @@ impl ModelInfer for CandleMistralModelInfer {
 
     fn infer(
         &mut self,
-        batch: &RecordBatch,
+        batch: &InferBatch,
         context: &InferContext,
         options: HashMap<String, String>,
-    ) -> Result<RecordBatch, InferError> {
+    ) -> Result<InferBatch, InferError> {
         let mut arg = StringMap::new();
         for kv in options.into_iter() {
             arg.insert(kv.0, kv.1);
         }
         let arg = CandleMistralArg::from_stringmap(arg);
 
-        let array = batch.column(0);
-        let values = array.as_any().downcast_ref::<StringArray>().unwrap();
+        let first_column_name = batch.column_names().first().unwrap();
+        let values = batch.column_values(first_column_name).unwrap();
         let mut pipeline = self.pipeline.clone();
         let mut pipeline = pipeline.borrow_mut();
         let mut pipeline = pipeline.as_mut().unwrap();
@@ -211,33 +205,34 @@ impl ModelInfer for CandleMistralModelInfer {
         let mut pos_list = vec![];
         let mut value_list = vec![];
         for (pos, value) in values.iter().enumerate() {
-            if value.is_none() {
+            if value.is_empty() {
                 continue;
             }
-            if let Some(value) = value {
-                pos_list.push(pos);
-                value_list.push(value.clone().to_string());
-            }
+            pos_list.push(pos);
+            value_list.push(value.clone().to_string());
         }
 
         let mut gen_value_list = vec![];
         for chunk_values in &value_list.into_iter().chunks(arg.max_batch_size as usize) {
-            let chunk_values= chunk_values.collect_vec();
-            let mut chunk_result_values = pipeline.gen(&chunk_values, arg.sample_len as usize).unwrap();
+            let chunk_values = chunk_values.collect_vec();
+            let mut chunk_result_values = pipeline
+                .gen(&chunk_values, arg.sample_len as usize)
+                .unwrap();
             gen_value_list.append(&mut chunk_result_values);
         }
 
         let mut result_value_list = vec![];
         for (pos, gen_value) in pos_list.iter().zip(gen_value_list.iter()) {
-            for _ in 0 .. (pos - result_value_list.len()) {
+            for _ in 0..(pos - result_value_list.len()) {
                 result_value_list.push("".to_string());
             }
             result_value_list.push(gen_value.to_owned().join(""));
         }
-        let result_batch = RecordBatch::try_from_iter(vec![(
-            RESULT_COLUMN_NAME,
-            Arc::new(StringArray::from(result_value_list)) as _,
-        )]).map_err(|e| InferError::ArrowError { source: e })?;
+        let result_batch = InferBatch::new(
+            batch.column_names(),
+            &HashMap::from([(RESULT_COLUMN_NAME.to_string(), result_value_list.clone())]),
+        )
+        .unwrap();
         Ok(result_batch)
     }
 }
@@ -269,7 +264,10 @@ impl CandleMistralTextGen {
         device: &Device,
     ) -> Self {
         let logits_processor = LogitsProcessor::new(seed, temp, top_p);
-        let tokenizers = tokenizers.into_iter().map(|t| TokenOutputStream::new(t)).collect::<Vec<_>>();
+        let tokenizers = tokenizers
+            .into_iter()
+            .map(|t| TokenOutputStream::new(t))
+            .collect::<Vec<_>>();
         let model = CandleMistralTextGenModel::new(model);
         Self {
             model,
@@ -283,19 +281,21 @@ impl CandleMistralTextGen {
 }
 
 pub struct CandleMistralTextGenModel {
-    model: ModelMode
+    model: ModelMode,
 }
 
 impl crate::models::mistral::CandleMistralTextGenModel {
     pub fn new(model: ModelMode) -> Self {
-        Self {
-            model
-        }
+        Self { model }
     }
 }
 
 impl BatchGenModel for crate::models::mistral::CandleMistralTextGenModel {
-    fn forward(&mut self, batch_input: &Tensor, seqlen_offset: usize) -> Result<Tensor, InferError> {
+    fn forward(
+        &mut self,
+        batch_input: &Tensor,
+        seqlen_offset: usize,
+    ) -> Result<Tensor, InferError> {
         let logits = match &mut self.model {
             ModelMode::Normal(m) => m.forward(&batch_input, seqlen_offset)?,
             ModelMode::Quantized(m) => m.forward(&batch_input, seqlen_offset)?,
@@ -313,7 +313,11 @@ impl BatchGenModel for crate::models::mistral::CandleMistralTextGenModel {
 }
 
 impl BatchGen for CandleMistralTextGen {
-    fn gen(&mut self, prompts: &Vec<String>, sample_len: usize) -> Result<Vec<Vec<String>>, InferError> {
+    fn gen(
+        &mut self,
+        prompts: &Vec<String>,
+        sample_len: usize,
+    ) -> Result<Vec<Vec<String>>, InferError> {
         println!("prompts: {:#?}", prompts);
         for tokenizer in &mut self.tokenizers {
             tokenizer.clear();
@@ -336,7 +340,17 @@ impl BatchGen for CandleMistralTextGen {
         };
 
         self.model.reset()?;
-        let result_batch_tokens = candle_gen::batch_infer(&mut self.model, &mut self.tokenizers, &mut self.logits_processor, prompts.clone(), sample_len, &self.device, eos_token, pad_token).unwrap();
+        let result_batch_tokens = candle_gen::batch_infer(
+            &mut self.model,
+            &mut self.tokenizers,
+            &mut self.logits_processor,
+            prompts.clone(),
+            sample_len,
+            &self.device,
+            eos_token,
+            pad_token,
+        )
+        .unwrap();
         Ok(result_batch_tokens)
     }
 }

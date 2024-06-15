@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [lib]
-name ="tabular_fabric_batch_infer"
+name = "tabular_fabric_batch_infer"
 path = "src/lib.rs"
 test = false
 bench = false
@@ -12,10 +12,9 @@ bench = false
 [dependencies]
 
 tokio = { workspace = true }
-arrow = { workspace = true }
 thiserror = { version = "1.0.50" }
 anyhow = { workspace = true }
-itertools = { workspace = true}
+itertools = { workspace = true }
 structmap = { workspace = true }
 structmap-derive = { workspace = true }
 serde_json = { workspace = true }
@@ -26,15 +25,14 @@ tracing-subscriber = { workspace = true }
 #candle-transformers = {  git = "https://github.com/huggingface/candle.git", branch = "main", features = ["default"] }
 #candle-nn = {  git = "https://github.com/huggingface/candle.git", branch = "main", features = ["default"] }
 
-candle-core = {  version = "0.4.1", features = ["default"] }
-candle-transformers = {  version = "0.4.1", features = ["default"] }
-candle-nn = {  version = "0.4.1", features = ["default"] }
+candle-core = { version = "0.4.1", features = ["default"] }
+candle-transformers = { version = "0.4.1", features = ["default"] }
+candle-nn = { version = "0.4.1", features = ["default"] }
 tokenizers = { version = "0.13.3" }
 
-llama-cpp-2 = {  version = "0.1.46"}
 log = "0.4.20"
 encoding_rs = "0.8.33"
 
 
 [features]
-cuda = ["candle-core/cuda", "candle-transformers/cuda", "candle-nn/cuda", "llama-cpp-2/cublas"]
+cuda = ["candle-core/cuda", "candle-transformers/cuda", "candle-nn/cuda"]

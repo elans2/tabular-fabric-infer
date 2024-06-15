@@ -4,8 +4,6 @@ extern crate intel_mkl_src;
 #[cfg(feature = "accelerate")]
 extern crate accelerate_src;
 
-use arrow::array::{Array, StringArray, UInt64Array};
-use arrow::record_batch::RecordBatch;
 use std::backtrace::Backtrace;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -14,20 +12,19 @@ use std::sync::Arc;
 
 use candle_transformers::models::qwen2::{Config, Model};
 
+use crate::base::{InferBatch, InferContext, ModelInfer};
 use crate::errors::InferError;
+use crate::models::candle_gen;
+use crate::models::candle_gen::{BatchGen, BatchGenModel};
+use crate::models::constants::RESULT_COLUMN_NAME;
+use crate::models::utils::token_output_stream::TokenOutputStream;
 use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::generation::LogitsProcessor;
-use tokenizers::Tokenizer;
-use crate::base::{ModelInfer, InferContext};
-use crate::models::utils::token_output_stream::TokenOutputStream;
 use structmap::FromMap;
 use structmap_derive::FromMap;
-use crate::models::constants::RESULT_COLUMN_NAME;
-use crate::models::ggml::GgmlLLamaModelInfer;
+use tokenizers::Tokenizer;
 use tracing::{debug, info};
-use crate::models::candle_gen;
-use crate::models::candle_gen::{BatchGen, BatchGenModel};
 
 pub fn device(cpu: bool) -> Result<Device, InferError> {
     if cpu {
@@ -96,9 +93,6 @@ impl Default for CandleQwenArg {
     }
 }
 
-
-
-
 pub struct CandleQwenModelInfer {
     pipeline: Arc<RefCell<Option<CandleQwenTextGen>>>,
 }
@@ -115,15 +109,11 @@ impl CandleQwenModelInfer {
 }
 
 impl ModelInfer for CandleQwenModelInfer {
-
     fn file_resources(&self) -> Vec<String> {
         vec!["tokenizer_file".to_string(), "weight_files".to_string()]
     }
 
-    fn load(
-        &mut self,
-        options: HashMap<String, String>,
-    ) -> Result<bool, InferError> {
+    fn load(&mut self, options: HashMap<String, String>) -> Result<bool, InferError> {
         let mut arg = StringMap::new();
         for kv in options.into_iter() {
             arg.insert(kv.0, kv.1);
@@ -139,20 +129,22 @@ impl ModelInfer for CandleQwenModelInfer {
         );
         info!(
             "temp: {:.2} repeat-penalty: {:.2} repeat-last-n: {}",
-            arg.temperature,
-            arg.repeat_penalty,
-            arg.repeat_last_n
+            arg.temperature, arg.repeat_penalty, arg.repeat_last_n
         );
 
-        let tokenizer_file = std::path::PathBuf::from(
-            arg.tokenizer_file,
-        );
+        let tokenizer_file = std::path::PathBuf::from(arg.tokenizer_file);
 
-        let weight_files = arg.weight_files.split(",").map(|x| std::path::PathBuf::from(x)).collect::<Vec<std::path::PathBuf>>();
+        let weight_files = arg
+            .weight_files
+            .split(",")
+            .map(|x| std::path::PathBuf::from(x))
+            .collect::<Vec<std::path::PathBuf>>();
 
         info!("load tokenizer file {:?}", tokenizer_file);
         let tokenizer = Tokenizer::from_file(tokenizer_file).map_err(anyhow::Error::msg)?;
-        let tokenizers = (0..arg.max_batch_size).map(|_| tokenizer.clone()).collect::<Vec<_>>();
+        let tokenizers = (0..arg.max_batch_size)
+            .map(|_| tokenizer.clone())
+            .collect::<Vec<_>>();
 
         let config = std::fs::read_to_string(arg.config_file).unwrap();
         let config: Config = serde_json::from_str(&config).unwrap();
@@ -189,23 +181,22 @@ impl ModelInfer for CandleQwenModelInfer {
 
     fn infer(
         &mut self,
-        batch: &RecordBatch,
+        batch: &InferBatch,
         context: &InferContext,
         options: HashMap<String, String>,
-    ) -> Result<RecordBatch, InferError> {
+    ) -> Result<InferBatch, InferError> {
         let mut arg = StringMap::new();
         for kv in options.into_iter() {
             arg.insert(kv.0, kv.1);
         }
         let arg = CandleQwenArg::from_stringmap(arg);
 
-        let array = batch.column(0);
-        let values = array.as_any().downcast_ref::<StringArray>().unwrap();
+        let first_column_name = batch.column_names().first().unwrap();
+        let values = batch.column_values(first_column_name).unwrap();
         let mut pipeline = self.pipeline.clone();
         let mut pipeline = pipeline.borrow_mut();
         let mut pipeline = pipeline.as_mut().unwrap();
 
-        let values = values.iter().collect::<Vec<_>>();
         let (mut pos_list, mut value_list) = candle_gen::filter_not_empty_values(&values).unwrap();
 
         println!("start infer 1");
@@ -213,12 +204,21 @@ impl ModelInfer for CandleQwenModelInfer {
         println!("pos list {:#?}", pos_list);
         println!("value list {:#?}", value_list);
 
-        let mut gen_value_list = candle_gen::chunk_gen(pipeline, value_list, arg.max_batch_size as usize, arg.sample_len as usize).unwrap();
-        let mut result_value_list = candle_gen::align_gen_values_with_position(pos_list, gen_value_list).unwrap();
-        let result_batch = RecordBatch::try_from_iter(vec![(
-            RESULT_COLUMN_NAME,
-            Arc::new(StringArray::from(result_value_list)) as _,
-        )]).map_err(|e| InferError::ArrowError { source: e })?;
+        let mut gen_value_list = candle_gen::chunk_gen(
+            pipeline,
+            value_list,
+            arg.max_batch_size as usize,
+            arg.sample_len as usize,
+        )
+        .unwrap();
+        let mut result_value_list =
+            candle_gen::align_gen_values_with_position(pos_list, gen_value_list).unwrap();
+
+        let result_batch = InferBatch::new(
+            batch.column_names(),
+            &HashMap::from([(RESULT_COLUMN_NAME.to_string(), result_value_list.clone())]),
+        )
+        .unwrap();
         println!("{:#?}", result_batch);
         Ok(result_batch)
     }
@@ -229,19 +229,21 @@ enum ModelMode {
 }
 
 pub struct CandleQwenTextGenModel {
-    model: ModelMode
+    model: ModelMode,
 }
 
 impl crate::models::qwen::CandleQwenTextGenModel {
     pub fn new(model: ModelMode) -> Self {
-        Self {
-            model
-        }
+        Self { model }
     }
 }
 
 impl BatchGenModel for crate::models::qwen::CandleQwenTextGenModel {
-    fn forward(&mut self, batch_input: &Tensor, seqlen_offset: usize) -> Result<Tensor, InferError> {
+    fn forward(
+        &mut self,
+        batch_input: &Tensor,
+        seqlen_offset: usize,
+    ) -> Result<Tensor, InferError> {
         let logits = match &mut self.model {
             ModelMode::Normal(m) => m.forward(&batch_input, seqlen_offset)?,
         };
@@ -255,8 +257,6 @@ impl BatchGenModel for crate::models::qwen::CandleQwenTextGenModel {
         Ok(())
     }
 }
-
-
 
 pub struct CandleQwenTextGen {
     model: CandleQwenTextGenModel,
@@ -280,7 +280,10 @@ impl CandleQwenTextGen {
         device: &Device,
     ) -> Self {
         let logits_processor = LogitsProcessor::new(seed, temp, top_p);
-        let tokenizers = tokenizers.into_iter().map(|t| TokenOutputStream::new(t)).collect::<Vec<_>>();
+        let tokenizers = tokenizers
+            .into_iter()
+            .map(|t| TokenOutputStream::new(t))
+            .collect::<Vec<_>>();
         let model = CandleQwenTextGenModel::new(model);
         Self {
             model,
@@ -294,8 +297,11 @@ impl CandleQwenTextGen {
 }
 
 impl BatchGen for CandleQwenTextGen {
-
-    fn gen(&mut self, prompts: &Vec<String>, sample_len: usize) -> Result<Vec<Vec<String>>, InferError> {
+    fn gen(
+        &mut self,
+        prompts: &Vec<String>,
+        sample_len: usize,
+    ) -> Result<Vec<Vec<String>>, InferError> {
         println!("prompts: {:#?}", prompts);
         for tokenizer in &mut self.tokenizers {
             tokenizer.clear();
@@ -318,7 +324,17 @@ impl BatchGen for CandleQwenTextGen {
         };
 
         self.model.reset()?;
-        let result_batch_tokens = candle_gen::batch_infer(&mut self.model, &mut self.tokenizers, &mut self.logits_processor, prompts.clone(), sample_len, &self.device, eos_token, pad_token).unwrap();
+        let result_batch_tokens = candle_gen::batch_infer(
+            &mut self.model,
+            &mut self.tokenizers,
+            &mut self.logits_processor,
+            prompts.clone(),
+            sample_len,
+            &self.device,
+            eos_token,
+            pad_token,
+        )
+        .unwrap();
         Ok(result_batch_tokens)
     }
 }

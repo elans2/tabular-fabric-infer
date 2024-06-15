@@ -1,26 +1,21 @@
-use arrow::array::StringArray;
-use arrow::array::UInt64Array;
-use arrow::record_batch::RecordBatch;
-
 use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tabular_fabric_batch_infer::base::{InferContext, ModelInfer};
+use tabular_fabric_batch_infer::base::{InferBatch, InferContext, ModelInfer};
 use tabular_fabric_batch_infer::models::mistral::CandleMistralModelInfer;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut infer = CandleMistralModelInfer::new();
 
-    let batch = RecordBatch::try_from_iter(vec![(
-        "col",
-        Arc::new(StringArray::from(vec![
-            //"Here is a sample quick sort implementation in rust".to_string(),
-            //"Here is a sample quick sort implementation in rust".to_string(),
-            "what about mistral model ?".to_string(),
-        ])) as _,
-    )])
+    let batch = InferBatch::new(
+        &vec!["col".to_string()],
+        &HashMap::from([(
+            "col".to_string(),
+            vec!["what about mistral model ?".to_string()],
+        )]),
+    )
     .unwrap();
 
     let infer_context = InferContext::default();
