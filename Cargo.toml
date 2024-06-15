@@ -19,3 +19,5 @@ structmap-derive = { version = "0.1.6" }
 
 [feature]
 cuda = ["tabular-fabric-batch-infer/cuda"]
+metal = ["tabular-fabric-batch-infer/metal"]
+
