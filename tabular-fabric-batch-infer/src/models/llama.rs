@@ -353,7 +353,7 @@ impl BatchGen for CandleLlamaTextGen {
         for tokenizer in &mut self.tokenizers {
             tokenizer.clear();
         }
-        let eos_token = match self.tokenizers[0].get_token("</s>") {
+        let eos_token = match self.tokenizers[0].get_token("<|end_of_text|>") {
             Some(token) => token,
             None => {
                 return Err(InferError::GenericError {
@@ -361,7 +361,7 @@ impl BatchGen for CandleLlamaTextGen {
                 })
             }
         };
-        let pad_token = match self.tokenizers[0].get_token("</s>") {
+        let pad_token = match self.tokenizers[0].get_token("<|end_of_text|>") {
             Some(token) => token,
             None => {
                 return Err(InferError::GenericError {
