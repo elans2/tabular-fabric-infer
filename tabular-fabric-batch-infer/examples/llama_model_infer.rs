@@ -14,6 +14,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &HashMap::from([(
             "col".to_string(),
             vec!["what about llama model ?".to_string()],
+            //vec!["what about llama model ?".to_string(), "what about mistral model ?".to_string()],
         )]),
     )
     .unwrap();

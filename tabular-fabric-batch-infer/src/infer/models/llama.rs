@@ -365,7 +365,7 @@ impl BatchGen for CandleLlamaTextGen {
                 })
             }
         };
-        let pad_token = match self.tokenizers[0].get_token("<|end_of_text|>") {
+        let pad_token = match self.tokenizers[0].get_token("<|eot_id|>") {
             Some(token) => token,
             None => {
                 return Err(InferError::GenericError {

@@ -3,7 +3,7 @@ use crate::errors::InferError;
 use crate::infer::utils::token_output_stream::TokenOutputStream;
 use candle_core::{DType, Device, Tensor};
 use candle_transformers::generation::LogitsProcessor;
-use itertools::Itertools;
+use itertools::{Itertools, max, min};
 
 pub trait BatchGenModel {
     fn forward(&mut self, batch_input: &Tensor, seqlen_offset: usize)
@@ -85,32 +85,24 @@ pub fn batch_infer(
         batch_tokens.push(tokens);
     }
     println!("batch tokens {:#?}", batch_tokens);
-    let mut max_seq_len = batch_tokens.clone().into_iter().map(|ts| ts.len()).max();
-    match max_seq_len {
-        Some(max_seq_len) => {
-            for tokens in &mut batch_tokens {
-                for _ in 0..(max_seq_len - tokens.len()) {
-                    tokens.push(pad_token);
-                }
-            }
-        }
-        None => {
-            return Err(InferError::GenericError {
-                msg: "failed to get max seq len".to_string(),
-            });
-        }
-    }
-
-    println!("batch tokens {:#?}", batch_tokens);
     let mut result_batch_tokens: Vec<Vec<String>> = vec![];
     println!("sample_len, {}", sample_len);
+
+    let prompt_batch_tokens_lens = batch_tokens.iter().map(|b| b.len()).collect::<Vec<usize>>();
+    let prompt_row_tokens_len_min = min(prompt_batch_tokens_lens.clone()).unwrap();
+    let prompt_row_tokens_len_max = max(prompt_batch_tokens_lens.clone()).unwrap();
+    let batch_tokens_max_lens = batch_tokens.iter().map(|b| b.len() + sample_len).collect::<Vec<usize>>();
+    
+    println!("{:#?}, {}, {}, {:#?}", prompt_batch_tokens_lens, prompt_row_tokens_len_min, prompt_row_tokens_len_max, batch_tokens_max_lens);
+
     let mut end_batches = HashSet::new();
-    for pos in 0..sample_len {
-        let context_size = if pos > 0 { 1 } else { batch_tokens[0].len() };
-        let start_pos = batch_tokens[0].len().saturating_sub(context_size);
+    
+    for sample_pos in 0..(prompt_row_tokens_len_max - prompt_row_tokens_len_min + sample_len) {
+        let (start_pos, end_pos) = if sample_pos > 0 { (prompt_row_tokens_len_min + sample_pos - 1, prompt_row_tokens_len_min + sample_pos) } else { (0, prompt_row_tokens_len_min) };
+        println!("sample pos {}, start_ps, end_pos {}, {}", sample_pos, start_pos, end_pos);
         let mut row_inputs = vec![];
         for batch_pos in 0..batch_tokens.len() {
-            let ctxt = &batch_tokens[batch_pos][start_pos..];
+            let ctxt = &batch_tokens[batch_pos][start_pos..end_pos];
             let row_input = Tensor::new(ctxt, device)?;
             println!("row_input 1: {:#?}", row_input.shape());
             let row_input = row_input.unsqueeze(0)?;
@@ -121,7 +113,7 @@ pub fn batch_infer(
         println!("batch_input 1: {:#?}", batch_input.shape());
         let logits = batch_gen_model.forward(&batch_input, start_pos)?;
 
-        for batch_pos in 0..batch_tokens.len() {
+        for batch_pos in 0..row_inputs.len() {
             let logits = logits.get(batch_pos)?;
             let logits = logits.squeeze(0)?.to_dtype(DType::F32)?;
             // let logits = if self.repeat_penalty == 1. {
@@ -136,7 +128,11 @@ pub fn batch_infer(
             // };
             println!("batch pos {}", batch_pos);
             let next_token = logits_processor.sample(&logits)?;
-            batch_tokens[batch_pos].push(next_token);
+            if sample_pos >= (prompt_batch_tokens_lens[batch_pos] - prompt_row_tokens_len_min) {
+                batch_tokens[batch_pos].push(next_token);
+            }
+            println!("batch pos {}, next {}", batch_pos, next_token);
+
             if end_batches.contains(&batch_pos) {
                 continue;
             }
@@ -145,21 +141,23 @@ pub fn batch_infer(
                 end_batches.insert(batch_pos.clone());
                 continue;
             }
-            println!("batch pos {}", batch_pos);
-            println!("batch pos {}, next {}", batch_pos, next_token);
-            if let Some(t) = tokenizers[batch_pos].next_token(next_token)? {
-                if batch_pos < result_batch_tokens.len() {
-                    println!("p1, {}, {}", pos, batch_pos);
-                    result_batch_tokens[batch_pos].push(t);
+
+            if sample_pos >= (prompt_batch_tokens_lens[batch_pos] - prompt_row_tokens_len_min) && sample_pos < (sample_len + (prompt_batch_tokens_lens[batch_pos] - prompt_row_tokens_len_min)) {
+                if let Some(t) = tokenizers[batch_pos].next_token(next_token)? {
+                    if batch_pos < result_batch_tokens.len() {
+                        println!("p1, {}, {}", sample_pos, batch_pos);
+                        result_batch_tokens[batch_pos].push(t);
+                    } else {
+                        println!("p2, {}, {}", sample_pos, batch_pos);
+                        result_batch_tokens.push(vec![t]);
+                    }
                 } else {
-                    println!("p2, {}, {}", pos, batch_pos);
-                    result_batch_tokens.push(vec![t]);
+                    println!("no token");
                 }
-            } else {
-                println!("no token");
             }
         }
     }
+
     for batch_pos in 0..batch_tokens.len() {
         if let Some(rest) = tokenizers[batch_pos]
             .decode_rest()
