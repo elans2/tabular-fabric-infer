@@ -101,7 +101,7 @@ pub struct CandleLlamaModelInfer {
 unsafe impl Sync for CandleLlamaModelInfer {}
 unsafe impl Send for CandleLlamaModelInfer {}
 
-struct CacheBuilder {
+pub struct CacheBuilder {
     use_kv_cache: bool,
     dtype: DType,
     config: Config,
@@ -267,7 +267,7 @@ impl ModelInfer for CandleLlamaModelInfer {
     }
 }
 
-enum ModelMode {
+pub enum ModelMode {
     Normal(Model),
 }
 

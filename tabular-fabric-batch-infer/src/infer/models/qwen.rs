@@ -224,7 +224,7 @@ impl ModelInfer for CandleQwenModelInfer {
     }
 }
 
-enum ModelMode {
+pub enum ModelMode {
     Normal(Model),
 }
 

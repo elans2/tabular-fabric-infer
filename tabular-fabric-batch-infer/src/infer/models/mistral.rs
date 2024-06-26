@@ -235,7 +235,7 @@ impl ModelInfer for CandleMistralModelInfer {
     }
 }
 
-enum ModelMode {
+pub enum ModelMode {
     Normal(Model),
     Quantized(QModel),
 }
