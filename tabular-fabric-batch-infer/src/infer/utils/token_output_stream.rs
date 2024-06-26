@@ -35,20 +35,25 @@ impl TokenOutputStream {
 
     // https://github.com/huggingface/text-generation-inference/blob/5ba53d44a18983a4de32d122f4cb46f4a17d9ef6/server/text_generation_server/models/model.py#L68
     pub fn next_token(&mut self, token: u32) -> Result<Option<String>, InferError> {
+        println!("next token");
         let prev_text = if self.tokens.is_empty() {
             String::new()
         } else {
             let tokens = &self.tokens[self.prev_index..self.current_index];
             self.decode(tokens)?
         };
+        println!("exists tokens {:#?}, {}", self.tokens, token);
         self.tokens.push(token);
         let text = self.decode(&self.tokens[self.prev_index..])?;
+        println!("text {:#?}, {:#?}", text, prev_text);
         if text.len() > prev_text.len() && text.chars().last().unwrap().is_ascii() {
             let text = text.split_at(prev_text.len());
             self.prev_index = self.current_index;
             self.current_index = self.tokens.len();
+            println!("t1");
             Ok(Some(text.1.to_string()))
         } else {
+            println!("t2");
             Ok(None)
         }
     }

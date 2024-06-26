@@ -6,24 +6,21 @@ extern crate accelerate_src;
 
 use std::backtrace::Backtrace;
 use std::cell::{Cell, RefCell};
-use std::cmp::max;
 use std::collections::HashMap;
 use std::ops::DerefMut;
 use std::sync::Arc;
 
-use candle_transformers::models::phi::{Config, Model};
+use candle_transformers::models::qwen2::{Config, Model};
 
 use crate::base::{InferBatch, InferContext, ModelInfer};
 use crate::errors::InferError;
-use crate::models::candle_gen::{BatchGen, BatchGenModel};
-use crate::models::constants::RESULT_COLUMN_NAME;
-use crate::models::mistral::CandleMistralModelInfer;
-use crate::models::utils::token_output_stream::TokenOutputStream;
-use crate::models::{candle_gen, utils};
-use candle_core::{DType, Device, MetalDevice, Tensor};
+use crate::infer::candle_gen;
+use crate::infer::candle_gen::{BatchGen, BatchGenModel};
+use crate::infer::constants::RESULT_COLUMN_NAME;
+use crate::infer::utils::token_output_stream::TokenOutputStream;
+use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::generation::LogitsProcessor;
-use itertools::Itertools;
 use structmap::FromMap;
 use structmap_derive::FromMap;
 use tokenizers::Tokenizer;
@@ -41,8 +38,8 @@ pub fn device(cpu: bool) -> Result<Device, InferError> {
     }
 }
 
-#[derive(FromMap, Clone)]
-struct CandlePhiArg {
+#[derive(FromMap)]
+struct CandleQwenArg {
     /// Run on CPU rather than on GPU.
     cpu: bool,
 
@@ -59,11 +56,11 @@ struct CandlePhiArg {
 
     sample_len: u64,
 
+    config_file: String,
+
     tokenizer_file: String,
 
     weight_files: String,
-
-    config_file: String,
 
     quantized: bool,
 
@@ -76,17 +73,17 @@ struct CandlePhiArg {
     max_batch_size: u64,
 }
 
-impl Default for CandlePhiArg {
+impl Default for CandleQwenArg {
     fn default() -> Self {
         Self {
+            config_file: "".to_string(),
             tokenizer_file: "".to_string(),
             weight_files: "".to_string(),
-            config_file: "".to_string(),
             cpu: true,
             use_flash_attn: false,
             temperature: 0.0,
-            top_p: 100 as f64,
             sample_len: 500,
+            top_p: 100 as f64,
             seed: 299792458,
             quantized: false,
             repeat_penalty: 1.0,
@@ -96,30 +93,24 @@ impl Default for CandlePhiArg {
     }
 }
 
-pub struct CandlePhiModelInfer {
-    pipeline: Arc<RefCell<Option<CandlePhiTextGen>>>,
-    arg: Option<CandlePhiArg>,
+pub struct CandleQwenModelInfer {
+    pipeline: Arc<RefCell<Option<CandleQwenTextGen>>>,
 }
 
-unsafe impl Sync for CandlePhiModelInfer {}
-unsafe impl Send for CandlePhiModelInfer {}
+unsafe impl Sync for CandleQwenModelInfer {}
+unsafe impl Send for CandleQwenModelInfer {}
 
-impl CandlePhiModelInfer {
+impl CandleQwenModelInfer {
     pub fn new() -> Self {
         Self {
             pipeline: Arc::new(RefCell::new(None)),
-            arg: None,
         }
     }
 }
 
-impl ModelInfer for CandlePhiModelInfer {
+impl ModelInfer for CandleQwenModelInfer {
     fn file_resources(&self) -> Vec<String> {
-        vec![
-            "tokenizer_file".to_string(),
-            "config_file".to_string(),
-            "weight_files".to_string(),
-        ]
+        vec!["tokenizer_file".to_string(), "weight_files".to_string()]
     }
 
     fn load(&mut self, options: HashMap<String, String>) -> Result<bool, InferError> {
@@ -127,7 +118,7 @@ impl ModelInfer for CandlePhiModelInfer {
         for kv in options.into_iter() {
             arg.insert(kv.0, kv.1);
         }
-        let arg = CandlePhiArg::from_stringmap(arg);
+        let arg = CandleQwenArg::from_stringmap(arg);
 
         info!(
             "avx: {}, neon: {}, simd128: {}, f16c: {}",
@@ -141,7 +132,6 @@ impl ModelInfer for CandlePhiModelInfer {
             arg.temperature, arg.repeat_penalty, arg.repeat_last_n
         );
 
-        self.arg = Some(arg.clone());
         let tokenizer_file = std::path::PathBuf::from(arg.tokenizer_file);
 
         let weight_files = arg
@@ -172,7 +162,7 @@ impl ModelInfer for CandlePhiModelInfer {
             (ModelMode::Normal(model), device)
         };
 
-        let mut pipeline = CandlePhiTextGen::new(
+        let mut pipeline = CandleQwenTextGen::new(
             model,
             tokenizers,
             arg.seed,
@@ -195,14 +185,11 @@ impl ModelInfer for CandlePhiModelInfer {
         context: &InferContext,
         options: HashMap<String, String>,
     ) -> Result<InferBatch, InferError> {
-        println!("start infer 0");
-        println!("infer options: {:#?}", options);
         let mut arg = StringMap::new();
         for kv in options.into_iter() {
             arg.insert(kv.0, kv.1);
         }
-        let arg = CandlePhiArg::from_stringmap(arg);
-        println!("arg sample len {}", arg.sample_len);
+        let arg = CandleQwenArg::from_stringmap(arg);
 
         let first_column_name = batch.column_names().first().unwrap();
         let values = batch.column_values(first_column_name).unwrap();
@@ -210,7 +197,7 @@ impl ModelInfer for CandlePhiModelInfer {
         let mut pipeline = pipeline.borrow_mut();
         let mut pipeline = pipeline.as_mut().unwrap();
 
-        let (mut pos_list, mut value_list) = candle_gen::filter_not_empty_values(values).unwrap();
+        let (mut pos_list, mut value_list) = candle_gen::filter_not_empty_values(&values).unwrap();
 
         println!("start infer 1");
 
@@ -224,7 +211,7 @@ impl ModelInfer for CandlePhiModelInfer {
             arg.sample_len as usize,
         )
         .unwrap();
-        let result_value_list =
+        let mut result_value_list =
             candle_gen::align_gen_values_with_position(pos_list, gen_value_list).unwrap();
 
         let result_batch = InferBatch::new(
@@ -241,8 +228,38 @@ enum ModelMode {
     Normal(Model),
 }
 
-pub struct CandlePhiTextGen {
-    model: CandlePhiTextGenModel,
+pub struct CandleQwenTextGenModel {
+    model: ModelMode,
+}
+
+impl CandleQwenTextGenModel {
+    pub fn new(model: ModelMode) -> Self {
+        Self { model }
+    }
+}
+
+impl BatchGenModel for CandleQwenTextGenModel {
+    fn forward(
+        &mut self,
+        batch_input: &Tensor,
+        seqlen_offset: usize,
+    ) -> Result<Tensor, InferError> {
+        let logits = match &mut self.model {
+            ModelMode::Normal(m) => m.forward(&batch_input, seqlen_offset, None)?,
+        };
+        Ok(logits)
+    }
+
+    fn reset(&mut self) -> Result<(), InferError> {
+        match &mut self.model {
+            ModelMode::Normal(m) => m.clear_kv_cache(),
+        };
+        Ok(())
+    }
+}
+
+pub struct CandleQwenTextGen {
+    model: CandleQwenTextGenModel,
     device: Device,
     tokenizers: Vec<TokenOutputStream>,
     logits_processor: LogitsProcessor,
@@ -250,7 +267,7 @@ pub struct CandlePhiTextGen {
     repeat_last_n: usize,
 }
 
-impl CandlePhiTextGen {
+impl CandleQwenTextGen {
     #[allow(clippy::too_many_arguments)]
     fn new(
         model: ModelMode,
@@ -267,7 +284,7 @@ impl CandlePhiTextGen {
             .into_iter()
             .map(|t| TokenOutputStream::new(t))
             .collect::<Vec<_>>();
-        let model = CandlePhiTextGenModel::new(model);
+        let model = CandleQwenTextGenModel::new(model);
         Self {
             model,
             tokenizers,
@@ -279,42 +296,7 @@ impl CandlePhiTextGen {
     }
 }
 
-pub struct CandlePhiTextGenModel {
-    model: ModelMode,
-}
-
-impl CandlePhiTextGenModel {
-    pub fn new(model: ModelMode) -> Self {
-        Self { model }
-    }
-}
-
-impl BatchGenModel for CandlePhiTextGenModel {
-    fn forward(
-        &mut self,
-        batch_input: &Tensor,
-        seqlen_offset: usize,
-    ) -> Result<Tensor, InferError> {
-        println!(
-            "{:#?}, {:#?}",
-            batch_input.shape(),
-            batch_input.shape().dims()[1]
-        );
-        let logits = match &mut self.model {
-            ModelMode::Normal(m) => m.forward(&batch_input)?,
-        };
-        Ok(logits)
-    }
-
-    fn reset(&mut self) -> Result<(), InferError> {
-        match &mut self.model {
-            ModelMode::Normal(m) => m.clear_kv_cache(),
-        };
-        Ok(())
-    }
-}
-
-impl BatchGen for CandlePhiTextGen {
+impl BatchGen for CandleQwenTextGen {
     fn gen(
         &mut self,
         prompts: &Vec<String>,

@@ -9,17 +9,15 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use candle_transformers::models::llama;
-use candle_transformers::models::llama::{Config, Llama as Model, LlamaConfig};
+use candle_transformers::models::mistral::{Config, Model};
+use candle_transformers::models::quantized_mistral::Model as QModel;
 
 use crate::base::{InferBatch, InferContext, ModelInfer};
 use crate::errors::InferError;
-use crate::models::candle_gen;
-use crate::models::candle_gen::{BatchGen, BatchGenModel};
-use crate::models::constants::RESULT_COLUMN_NAME;
-use crate::models::phi::CandlePhiTextGenModel;
-use crate::models::qwen::CandleQwenTextGenModel;
-use crate::models::utils::token_output_stream::TokenOutputStream;
+use crate::infer::candle_gen;
+use crate::infer::candle_gen::{BatchGen, BatchGenModel};
+use crate::infer::constants::RESULT_COLUMN_NAME;
+use crate::infer::utils::token_output_stream::TokenOutputStream;
 use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::generation::LogitsProcessor;
@@ -42,7 +40,7 @@ pub fn device(cpu: bool) -> Result<Device, InferError> {
 }
 
 #[derive(FromMap)]
-struct CandleLlamaArg {
+struct CandleMistralArg {
     /// Run on CPU rather than on GPU.
     cpu: bool,
 
@@ -63,8 +61,6 @@ struct CandleLlamaArg {
 
     weight_files: String,
 
-    config_file: String,
-
     quantized: bool,
 
     /// Penalty to be applied for repeating tokens, 1. means no penalty.
@@ -76,12 +72,11 @@ struct CandleLlamaArg {
     max_batch_size: u64,
 }
 
-impl Default for CandleLlamaArg {
+impl Default for CandleMistralArg {
     fn default() -> Self {
         Self {
             tokenizer_file: "".to_string(),
             weight_files: "".to_string(),
-            config_file: "".to_string(),
             cpu: true,
             use_flash_attn: false,
             temperature: 0.0,
@@ -96,36 +91,14 @@ impl Default for CandleLlamaArg {
     }
 }
 
-pub struct CandleLlamaModelInfer {
-    pipeline: Arc<RefCell<Option<CandleLlamaTextGen>>>,
+pub struct CandleMistralModelInfer {
+    pipeline: Arc<RefCell<Option<CandleMistralTextGen>>>,
 }
 
-unsafe impl Sync for CandleLlamaModelInfer {}
-unsafe impl Send for CandleLlamaModelInfer {}
+unsafe impl Sync for CandleMistralModelInfer {}
+unsafe impl Send for CandleMistralModelInfer {}
 
-struct CacheBuilder {
-    use_kv_cache: bool,
-    dtype: DType,
-    config: Config,
-    device: Device,
-}
-
-impl CacheBuilder {
-    fn new(use_kv_cache: bool, dtype: DType, config: &Config, device: &Device) -> Self {
-        Self {
-            use_kv_cache,
-            dtype,
-            config: config.clone(),
-            device: device.clone(),
-        }
-    }
-
-    fn build(&self) -> llama::Cache {
-        llama::Cache::new(self.use_kv_cache, self.dtype, &self.config, &self.device).unwrap()
-    }
-}
-
-impl CandleLlamaModelInfer {
+impl CandleMistralModelInfer {
     pub fn new() -> Self {
         Self {
             pipeline: Arc::new(RefCell::new(None)),
@@ -133,7 +106,7 @@ impl CandleLlamaModelInfer {
     }
 }
 
-impl ModelInfer for CandleLlamaModelInfer {
+impl ModelInfer for CandleMistralModelInfer {
     fn file_resources(&self) -> Vec<String> {
         vec!["tokenizer_file".to_string(), "weight_files".to_string()]
     }
@@ -143,7 +116,7 @@ impl ModelInfer for CandleLlamaModelInfer {
         for kv in options.into_iter() {
             arg.insert(kv.0, kv.1);
         }
-        let arg = CandleLlamaArg::from_stringmap(arg);
+        let arg = CandleMistralArg::from_stringmap(arg);
 
         info!(
             "avx: {}, neon: {}, simd128: {}, f16c: {}",
@@ -170,11 +143,15 @@ impl ModelInfer for CandleLlamaModelInfer {
             .map(|_| tokenizer.clone())
             .collect::<Vec<_>>();
 
-        let mut config: LlamaConfig =
-            serde_json::from_slice(&std::fs::read(arg.config_file).unwrap()).unwrap();
-        let config = config.into_config(arg.use_flash_attn);
-        let (model, device, cache_builder) = if arg.quantized {
-            unimplemented!()
+        let config = Config::config_7b_v0_1(arg.use_flash_attn);
+        let (model, device) = if arg.quantized {
+            let filename = &weight_files[0];
+            let device = Device::new_metal(0)?;
+            let vb = candle_transformers::quantized_var_builder::VarBuilder::from_gguf(
+                filename, &device,
+            )?;
+            let model = QModel::new(&config, vb)?;
+            (ModelMode::Quantized(model), Device::Cpu)
         } else {
             let device = device(arg.cpu)?;
             let dtype = if device.is_cuda() {
@@ -183,17 +160,12 @@ impl ModelInfer for CandleLlamaModelInfer {
                 DType::F32
             };
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&weight_files, dtype, &device)? };
-            let model = Model::load(vb, &config)?;
-
-            let use_kv_cache = true;
-            let builder = CacheBuilder::new(use_kv_cache, dtype, &config, &device);
-
-            (ModelMode::Normal(model), device, builder)
+            let model = Model::new(&config, vb)?;
+            (ModelMode::Normal(model), device)
         };
 
-        let mut pipeline = CandleLlamaTextGen::new(
+        let mut pipeline = CandleMistralTextGen::new(
             model,
-            cache_builder,
             tokenizers,
             arg.seed,
             Some(arg.temperature),
@@ -219,7 +191,7 @@ impl ModelInfer for CandleLlamaModelInfer {
         for kv in options.into_iter() {
             arg.insert(kv.0, kv.1);
         }
-        let arg = CandleLlamaArg::from_stringmap(arg);
+        let arg = CandleMistralArg::from_stringmap(arg);
 
         let first_column_name = batch.column_names().first().unwrap();
         let values = batch.column_values(first_column_name).unwrap();
@@ -265,10 +237,11 @@ impl ModelInfer for CandleLlamaModelInfer {
 
 enum ModelMode {
     Normal(Model),
+    Quantized(QModel),
 }
 
-pub struct CandleLlamaTextGen {
-    model: CandleLlamaTextGenModel,
+pub struct CandleMistralTextGen {
+    model: CandleMistralTextGenModel,
     device: Device,
     tokenizers: Vec<TokenOutputStream>,
     logits_processor: LogitsProcessor,
@@ -276,11 +249,10 @@ pub struct CandleLlamaTextGen {
     repeat_last_n: usize,
 }
 
-impl CandleLlamaTextGen {
+impl CandleMistralTextGen {
     #[allow(clippy::too_many_arguments)]
     fn new(
         model: ModelMode,
-        cache_builder: CacheBuilder,
         tokenizers: Vec<Tokenizer>,
         seed: u64,
         temp: Option<f64>,
@@ -294,7 +266,7 @@ impl CandleLlamaTextGen {
             .into_iter()
             .map(|t| TokenOutputStream::new(t))
             .collect::<Vec<_>>();
-        let model = CandleLlamaTextGenModel::new(model, cache_builder);
+        let model = CandleMistralTextGenModel::new(model);
         Self {
             model,
             tokenizers,
@@ -306,44 +278,39 @@ impl CandleLlamaTextGen {
     }
 }
 
-pub struct CandleLlamaTextGenModel {
+pub struct CandleMistralTextGenModel {
     model: ModelMode,
-    cache_builder: CacheBuilder,
-    using_cache: llama::Cache,
 }
 
-impl CandleLlamaTextGenModel {
-    pub fn new(model: ModelMode, cache_builder: CacheBuilder) -> Self {
-        let using_cache = cache_builder.build();
-        Self {
-            model,
-            cache_builder,
-            using_cache,
-        }
+impl CandleMistralTextGenModel {
+    pub fn new(model: ModelMode) -> Self {
+        Self { model }
     }
 }
 
-impl BatchGenModel for CandleLlamaTextGenModel {
+impl BatchGenModel for CandleMistralTextGenModel {
     fn forward(
         &mut self,
         batch_input: &Tensor,
         seqlen_offset: usize,
     ) -> Result<Tensor, InferError> {
         let logits = match &mut self.model {
-            ModelMode::Normal(m) => {
-                m.forward(&batch_input, seqlen_offset, &mut self.using_cache)?
-            }
+            ModelMode::Normal(m) => m.forward(&batch_input, seqlen_offset)?,
+            ModelMode::Quantized(m) => m.forward(&batch_input, seqlen_offset)?,
         };
         Ok(logits)
     }
 
     fn reset(&mut self) -> Result<(), InferError> {
-        self.using_cache = self.cache_builder.build();
+        match &mut self.model {
+            ModelMode::Normal(m) => m.clear_kv_cache(),
+            ModelMode::Quantized(m) => m.clear_kv_cache(),
+        };
         Ok(())
     }
 }
 
-impl BatchGen for CandleLlamaTextGen {
+impl BatchGen for CandleMistralTextGen {
     fn gen(
         &mut self,
         prompts: &Vec<String>,
@@ -353,7 +320,7 @@ impl BatchGen for CandleLlamaTextGen {
         for tokenizer in &mut self.tokenizers {
             tokenizer.clear();
         }
-        let eos_token = match self.tokenizers[0].get_token("<|end_of_text|>") {
+        let eos_token = match self.tokenizers[0].get_token("</s>") {
             Some(token) => token,
             None => {
                 return Err(InferError::GenericError {
@@ -361,7 +328,7 @@ impl BatchGen for CandleLlamaTextGen {
                 })
             }
         };
-        let pad_token = match self.tokenizers[0].get_token("<|end_of_text|>") {
+        let pad_token = match self.tokenizers[0].get_token("</s>") {
             Some(token) => token,
             None => {
                 return Err(InferError::GenericError {

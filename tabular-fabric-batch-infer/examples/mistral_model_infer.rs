@@ -3,7 +3,7 @@ use std::env;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tabular_fabric_batch_infer::base::{InferBatch, InferContext, ModelInfer};
-use tabular_fabric_batch_infer::models::mistral::CandleMistralModelInfer;
+use tabular_fabric_batch_infer::infer::models::mistral::CandleMistralModelInfer;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

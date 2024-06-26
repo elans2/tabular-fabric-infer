@@ -3,7 +3,7 @@ use std::env;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tabular_fabric_batch_infer::base::{InferBatch, InferContext, ModelInfer};
-use tabular_fabric_batch_infer::models::llama::CandleLlamaModelInfer;
+use tabular_fabric_batch_infer::infer::models::llama::CandleLlamaModelInfer;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -13,7 +13,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &vec!["col".to_string()],
         &HashMap::from([(
             "col".to_string(),
-            vec!["what about mistral model ?".to_string()],
+            vec!["what about llama model ?".to_string()],
         )]),
     )
     .unwrap();
@@ -42,7 +42,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     load_options.insert("max_batch_size".to_string(), "2".to_string());
-
     println!("{:#?}", load_options);
 
     infer.load(load_options).unwrap();
@@ -52,6 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut infer_options = HashMap::new();
     infer_options.insert("sample_len".to_string(), "10".to_string());
+    infer_options.insert("max_batch_size".to_string(), "2".to_string());
     let result_batch = infer.infer(&batch, &infer_context, infer_options)?;
     println!("result {:#?}", result_batch);
 

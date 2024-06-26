@@ -1,5 +1,6 @@
+use std::collections::{HashMap, HashSet};
 use crate::errors::InferError;
-use crate::models::utils::token_output_stream::TokenOutputStream;
+use crate::infer::utils::token_output_stream::TokenOutputStream;
 use candle_core::{DType, Device, Tensor};
 use candle_transformers::generation::LogitsProcessor;
 use itertools::Itertools;
@@ -83,6 +84,7 @@ pub fn batch_infer(
             .to_vec();
         batch_tokens.push(tokens);
     }
+    println!("batch tokens {:#?}", batch_tokens);
     let mut max_seq_len = batch_tokens.clone().into_iter().map(|ts| ts.len()).max();
     match max_seq_len {
         Some(max_seq_len) => {
@@ -98,15 +100,17 @@ pub fn batch_infer(
             });
         }
     }
-    let mut generated_tokens = 0usize;
+
+    println!("batch tokens {:#?}", batch_tokens);
     let mut result_batch_tokens: Vec<Vec<String>> = vec![];
     println!("sample_len, {}", sample_len);
-    for index in 0..sample_len {
-        let context_size = if index > 0 { 1 } else { batch_tokens[0].len() };
+    let mut end_batches = HashSet::new();
+    for pos in 0..sample_len {
+        let context_size = if pos > 0 { 1 } else { batch_tokens[0].len() };
         let start_pos = batch_tokens[0].len().saturating_sub(context_size);
         let mut row_inputs = vec![];
-        for batch_idx in 0..batch_tokens.len() {
-            let ctxt = &batch_tokens[batch_idx][start_pos..];
+        for batch_pos in 0..batch_tokens.len() {
+            let ctxt = &batch_tokens[batch_pos][start_pos..];
             let row_input = Tensor::new(ctxt, device)?;
             println!("row_input 1: {:#?}", row_input.shape());
             let row_input = row_input.unsqueeze(0)?;
@@ -117,8 +121,8 @@ pub fn batch_infer(
         println!("batch_input 1: {:#?}", batch_input.shape());
         let logits = batch_gen_model.forward(&batch_input, start_pos)?;
 
-        for batch_idx in 0..batch_tokens.len() {
-            let logits = logits.get(batch_idx)?;
+        for batch_pos in 0..batch_tokens.len() {
+            let logits = logits.get(batch_pos)?;
             let logits = logits.squeeze(0)?.to_dtype(DType::F32)?;
             // let logits = if self.repeat_penalty == 1. {
             //     logits
@@ -130,27 +134,38 @@ pub fn batch_infer(
             //         &result_tokens[0][start_at..],
             //     )?
             // };
+            println!("batch pos {}", batch_pos);
             let next_token = logits_processor.sample(&logits)?;
-            generated_tokens += 1;
-            if next_token == eos_token {
-                break;
+            batch_tokens[batch_pos].push(next_token);
+            if end_batches.contains(&batch_pos) {
+                continue;
             }
-            batch_tokens[batch_idx].push(next_token);
-            if let Some(t) = tokenizers[batch_idx].next_token(next_token)? {
-                if index == 0 {
-                    result_batch_tokens.push(vec![t]);
+            if next_token == eos_token {
+                println!("continue");
+                end_batches.insert(batch_pos.clone());
+                continue;
+            }
+            println!("batch pos {}", batch_pos);
+            println!("batch pos {}, next {}", batch_pos, next_token);
+            if let Some(t) = tokenizers[batch_pos].next_token(next_token)? {
+                if batch_pos < result_batch_tokens.len() {
+                    println!("p1, {}, {}", pos, batch_pos);
+                    result_batch_tokens[batch_pos].push(t);
                 } else {
-                    result_batch_tokens[batch_idx].push(t);
+                    println!("p2, {}, {}", pos, batch_pos);
+                    result_batch_tokens.push(vec![t]);
                 }
+            } else {
+                println!("no token");
             }
         }
     }
-    for batch_idx in 0..batch_tokens.len() {
-        if let Some(rest) = tokenizers[batch_idx]
+    for batch_pos in 0..batch_tokens.len() {
+        if let Some(rest) = tokenizers[batch_pos]
             .decode_rest()
             .map_err(anyhow::Error::msg)?
         {
-            result_batch_tokens[batch_idx].push(rest);
+            result_batch_tokens[batch_pos].push(rest);
         }
     }
     Ok(result_batch_tokens)
