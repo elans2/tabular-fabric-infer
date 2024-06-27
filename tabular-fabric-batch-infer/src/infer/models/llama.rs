@@ -259,7 +259,7 @@ impl ModelInfer for CandleLlamaModelInfer {
             result_value_list.push(gen_value.to_owned().join(""));
         }
         let result_batch = InferBatch::new(
-            batch.column_names(),
+            &vec![RESULT_COLUMN_NAME.to_string()],
             &HashMap::from([(RESULT_COLUMN_NAME.to_string(), result_value_list.clone())]),
         )
         .unwrap();

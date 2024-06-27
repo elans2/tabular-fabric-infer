@@ -3,6 +3,12 @@ name = "tabular-fabric-batch-infer"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "tabular_fabric_batch_infer_core_server"
+path = "src/server/server.rs"
+test = false
+bench = false
+
 [lib]
 name = "tabular_fabric_batch_infer"
 path = "src/lib.rs"
@@ -28,6 +34,13 @@ tokenizers = { version = "0.19.1" }
 
 log = "0.4.20"
 encoding_rs = "0.8.33"
+
+tide = "0.16.0"
+async-std = { version = "1.8.0", features = ["attributes"] }
+serde = { version = "1.0", features = ["derive"] }
+femme = "2.2.1"
+dotenvy = "0.15"
+dotenv_config = "0.1"
 
 
 [features]
