@@ -5,7 +5,7 @@ edition = "2021"
 
 [[bin]]
 name = "tabular_fabric_batch_infer_core_server"
-path = "src/server/server.rs"
+path = "src/server/main.rs"
 test = false
 bench = false
 
@@ -41,6 +41,8 @@ serde = { version = "1.0", features = ["derive"] }
 femme = "2.2.1"
 dotenvy = "0.15"
 dotenv_config = "0.1"
+chrono = { workspace = true }
+chrono-tz = { workspace = true }
 
 
 [features]

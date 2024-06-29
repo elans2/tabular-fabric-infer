@@ -16,6 +16,8 @@ anyhow = "1.0.71"
 itertools = "0.11.0"
 structmap = { version = "0.1.6" }
 structmap-derive = { version = "0.1.6" }
+chrono = { version = "0.4", default-features = false, features = ["alloc", "std", "clock", "now"] }
+chrono-tz = "0.9"
 
 [feature]
 cuda = ["tabular-fabric-batch-infer/cuda"]

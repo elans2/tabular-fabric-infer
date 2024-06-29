@@ -1,3 +1,5 @@
+mod trace;
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::env;
@@ -9,8 +11,10 @@ use tabular_fabric_batch_infer::base::{InferBatch, InferContext, ModelInfer};
 use tabular_fabric_batch_infer::infer::models::llama::CandleLlamaModelInfer;
 use dotenv_config::EnvConfig;
 use dotenvy::dotenv;
+use tracing::info;
 use tabular_fabric_batch_infer::errors::InferError;
 use tabular_fabric_batch_infer::infer::models::mistral::CandleMistralModelInfer;
+use crate::trace::ServeLayer;
 
 
 #[derive(Debug, EnvConfig, Clone)]
@@ -88,7 +92,6 @@ struct State {
 
 #[async_std::main]
 async fn main() -> tide::Result<()> {
-    femme::start();
 
     if let Ok(o) = dotenv() {
         println!("config loaded from env file: {:?}", o);
@@ -97,6 +100,23 @@ async fn main() -> tide::Result<()> {
     }
 
     let config = Config::init().expect("Failed to load config from env");
+
+    {
+        use tracing_subscriber::layer::SubscriberExt;
+        use tracing_subscriber::util::SubscriberInitExt;
+        tracing_subscriber::registry()
+            .with(ServeLayer {
+                app: "tabular-infer-standalone-server".to_string(),
+                log_type: "general".to_string(),
+                log_format: config.log_format.clone(),
+                tz: config.timezone.clone(),
+                level: Some(config.log_level.clone()),
+            })
+            .init();
+    }
+    info!("config loaded: {:?}", config);
+    info!("Starting executor with config: {:?}", config);
+
     println!("{}", config.model_file);
     let model_config: ModelConfig = serde_json::from_str(&std::fs::read_to_string(config.model_file).unwrap()).unwrap();
 
@@ -108,7 +128,7 @@ async fn main() -> tide::Result<()> {
     let mut app = tide::with_state(state);
     app.with(tide::log::LogMiddleware::new());
 
-    app.at("/infer_plain").post(|mut req: Request<State>| async move {
+    app.at("/v1/infer-plain").post(|mut req: Request<State>| async move {
         let infer_req: InferPlainRequest = req.body_json().await?;
         println!("cat name: {:#?}", infer_req);
 
